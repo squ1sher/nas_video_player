@@ -1,0 +1,23 @@
+services:
+  video-player:
+    build: .
+    container_name: video-player
+    ports:
+      - "8080:8080"
+    volumes:
+      - /volume1/sclad/Wochya/Media/Running:/media/videos:ro
+      - /volume1/docker/video-player/data:/app/data
+      - /volume1/docker/video-player/thumbnails:/app/thumbnails
+      - /volume1/docker/video-player/cache:/app/cache
+      - /volume1/docker/video-player/logs:/app/logs
+    environment:
+      - VIDEO_LIBRARY_PATH=/media/videos
+      - DATABASE_PATH=/app/data/app.db
+      - THUMBNAILS_PATH=/app/thumbnails
+      - CACHE_PATH=/app/cache
+      - LOGS_PATH=/app/logs
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8080
+      - CHUNK_SIZE=1048576
+    restart: unless-stopped
+
