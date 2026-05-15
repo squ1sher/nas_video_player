@@ -1,11 +1,11 @@
-# Local NAS Video Player (MVP)
+# Local NAS Video Player
 
 Mini-YouTube style local web video player for Synology NAS.
 
 - Backend: FastAPI + SQLite + ffprobe/ffmpeg
 - Frontend: React + Vite + TypeScript
 - Deployment: single Docker container via Docker Compose
-- Network scope: local network only (no auth in MVP)
+- Network scope: local network only (no auth yet)
 
 ## Target NAS
 
@@ -13,38 +13,100 @@ Mini-YouTube style local web video player for Synology NAS.
 - DSM 7.2.2+ (tested target: 7.2.2-72806 Update 5)
 - Synology Container Manager (Docker Compose)
 
+## Phase 1.5 Features (current)
+
+### Watch progress / Resume playback
+- Global (single-user) watch progress saved in SQLite
+- Progress saved every 5 seconds, on pause, and on page close
+- Resume from saved position or start from beginning
+- Videos marked **completed** when ≥ 90 % watched
+- **Continue Watching** section on library page
+
+### Browser compatibility status
+- Each video is analyzed for browser playback compatibility:
+  - `direct_play` (green) — MP4/H.264/AAC or WebM/VP8/VP9/AV1/Opus
+  - `may_not_play` (yellow) — MKV, MOV, unknown codecs
+  - `needs_conversion` (red) — AVI, HEVC/H.265, DTS audio
+- Badge shown on video cards and watch page
+- Friendly error message if playback fails
+
+### Folder navigation
+- Videos organized by relative folder path
+- Browse folders on the **Folders** tab
+- Click a folder to filter the video grid
+- Folder paths are relative (NAS paths never exposed to frontend)
+
+### Scan status
+- Scan runs in background (non-blocking)
+- Real-time scan status: `idle | running | completed | failed`
+- Animated indicator shows which file is being indexed
+- Completion banner shows counts (scanned / added / updated / errors)
+
+### Default sorting — Newest first
+- Library defaults to newest videos first (`created_at desc`)
+- Sort dropdown: Newest first, Oldest first, Title A-Z, Title Z-A, Duration, File size
+
+### Open video in new tab
+- All video cards open the watch page in a **new browser tab**
+- Uses `<a target="_blank" rel="noopener noreferrer">`
+- Right-click / copy link / open in new tab work as expected
+- Library page stays open in original tab
+
+### Duplicate candidate detection
+- Separate **Scan Duplicates** action, independent from the normal library scan
+- Finds **likely duplicate candidates** using a fast metadata fingerprint
+- Does **not** read full files and does **not** calculate SHA256 in this phase
+- Shows duplicate groups, confidence, reason, thumbnails, relative paths, and potential space saving
+- Diagnostic only: duplicate scan does **not** delete, move, rename, or modify files
+
 ## Required NAS folders
 
-Create these folders on NAS:
+Create these folders on your NAS before first run:
 
-- `/volume1/video_library`
-- `/volume1/docker/video-player/data`
-- `/volume1/docker/video-player/thumbnails`
-- `/volume1/docker/video-player/cache`
-- `/volume1/docker/video-player/logs`
+```
+/volume1/video_library              ← your video files (read-only)
+/volume1/docker/video-player/data
+/volume1/docker/video-player/thumbnails
+/volume1/docker/video-player/cache
+/volume1/docker/video-player/logs
+```
 
 ## Project structure
 
 ```text
-video-player/
+nas_video_player/
   backend/
     app/
       main.py
       config.py
       database.py
-      models.py
+      models.py            # Video + WatchProgress models
       schemas.py
       scanner.py
       media_probe.py
       thumbnails.py
       streaming.py
+      compatibility.py     # Browser compatibility detection
+      scan_status.py       # In-process scan state tracker
       routes/
         health.py
-        videos.py
-        scan.py
+        videos.py          # List, detail, thumbnail, stream
+        scan.py            # POST scan, GET status, GET last-result
+        progress.py        # Watch progress endpoints
+        folders.py         # Folder listing
       utils/
         files.py
         logging_config.py
+    tests/
+      conftest.py
+      test_compatibility.py
+      test_files.py
+      test_folders.py
+      test_health.py
+      test_progress.py
+      test_scan_status.py
+      test_scanner.py
+      test_streaming.py
     requirements.txt
     Dockerfile
   frontend/
@@ -61,6 +123,8 @@ video-player/
         VideoPlayer.tsx
         SearchBar.tsx
         SortSelect.tsx
+        CompatibilityBadge.tsx
+        ScanStatusBar.tsx
       types/
         video.ts
       styles/
@@ -74,106 +138,138 @@ video-player/
   docker-compose.yml
   Dockerfile
   README.md
-  .env.example
-  .gitignore
 ```
 
 ## Environment variables
 
-See `.env.example`:
-
-- `VIDEO_LIBRARY_PATH=/media/videos`
-- `DATABASE_PATH=/app/data/app.db`
-- `THUMBNAILS_PATH=/app/thumbnails`
-- `CACHE_PATH=/app/cache`
-- `LOGS_PATH=/app/logs`
-- `APP_HOST=0.0.0.0`
-- `APP_PORT=8080`
-- `CHUNK_SIZE=1048576`
+| Variable             | Default              | Description                     |
+|----------------------|----------------------|---------------------------------|
+| `VIDEO_LIBRARY_PATH` | `/media/videos`      | Path to video library (mounted) |
+| `DATABASE_PATH`      | `/app/data/app.db`   | SQLite database file path       |
+| `THUMBNAILS_PATH`    | `/app/thumbnails`    | Thumbnails output directory     |
+| `CACHE_PATH`         | `/app/cache`         | Cache directory                 |
+| `LOGS_PATH`          | `/app/logs`          | Log file directory              |
+| `APP_HOST`           | `0.0.0.0`            | Bind address                    |
+| `APP_PORT`           | `8080`               | Bind port                       |
+| `CHUNK_SIZE`         | `1048576`            | Streaming chunk size (bytes)    |
 
 ## Build and run
-
-From project root:
 
 ```bash
 docker compose up -d --build
 ```
 
-Open app:
+Open the app: `http://NAS_IP:8080`
 
-- `http://NAS_IP:8080`
+> **Note:** If you are upgrading from Phase 1 (MVP), delete or clear the existing
+> SQLite database (`/volume1/docker/video-player/data/app.db`) before starting.
+> Phase 1.5 adds new columns and a new table which are not auto-migrated.
 
-## Local development notes
+## How to use
 
-- For local frontend build, use Node.js 18+ (recommended 20+).
-- Docker image already uses Node 20 in build stage, so NAS deployment is unaffected by local Node version.
-
-## How to scan library
-
-1. Open homepage.
-2. Click **Scan Library**.
-3. Wait for completion message.
-4. Videos appear as cards.
-5. Click a card to open watch page.
+1. Open `http://NAS_IP:8080`
+2. Click **Scan Library** — scan runs in background; watch the status bar
+3. Browse **All Videos** (newest first by default)
+4. Use **Folders** tab to navigate by directory
+5. Use **Continue Watching** tab to resume in-progress videos
+6. Use **Duplicates** tab to review likely duplicate candidates
+7. Click **Scan Duplicates** to run a separate duplicate scan
+8. Click any video card → opens watch page in a **new tab**
+9. Video resumes from last position automatically
+10. Close the tab — progress is saved
 
 ## API endpoints
 
-- `GET /api/health`
-- `POST /api/scan`
-- `GET /api/videos?q=&sort=&order=`
-- `GET /api/videos/{video_id}`
-- `GET /api/videos/{video_id}/thumbnail`
-- `GET /api/videos/{video_id}/stream` (HTTP Range supported)
+### Videos
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/videos` | List videos (`q`, `folder`, `sort`, `order`) |
+| `GET` | `/api/videos/{id}` | Video detail |
+| `GET` | `/api/videos/{id}/thumbnail` | Video thumbnail |
+| `GET` | `/api/videos/{id}/stream` | HTTP Range streaming |
 
-## Direct-play formats in MVP
+### Watch progress
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/videos/{id}/progress` | Get watch progress |
+| `PUT` | `/api/videos/{id}/progress` | Save watch progress |
+| `GET` | `/api/videos/continue-watching` | In-progress videos |
 
-- `.mp4`
-- `.m4v`
-- `.mov`
-- `.mkv`
-- `.avi`
-- `.webm`
+### Folders
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/folders` | List folders with video counts |
 
-## Known MVP limitations
+### Scan
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/scan` | Start background scan |
+| `GET` | `/api/scan/status` | Current scan status |
+| `GET` | `/api/scan/last-result` | Last scan result |
 
-- No login/password
-- Local network only
-- No live transcoding
-- Browser may not play some MKV/AVI/HEVC files
-- No subtitles yet
-- No users
-- No playlists
+### Duplicates
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/duplicates/scan` | Start duplicate candidate scan (strict mode) |
+| `GET` | `/api/duplicates/status` | Current duplicate scan status |
+| `GET` | `/api/duplicates/groups` | Latest duplicate candidate groups |
+| `GET` | `/api/duplicates/summary` | Latest duplicate summary |
 
-## Troubleshooting
+### Misc
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/health` | Health check |
 
-### Container cannot access video folder
+## Sort options
 
-- Check volume mapping: `/volume1/video_library:/media/videos:ro`
-- Verify folder permissions for Container Manager
-- Ensure videos are actually inside `/volume1/video_library`
+The `sort` query param for `GET /api/videos`:
 
-### Port 8080 already in use
+| Value | Description |
+|-------|-------------|
+| `created_at` (default) | When video was first indexed |
+| `file_modified_at` | File system modification time |
+| `indexed_at` | When video was last scanned |
+| `title` | Alphabetical |
+| `duration` | Video duration |
+| `size` | File size |
 
-- Change host port in `docker-compose.yml`, e.g. `8081:8080`
-- Restart compose stack
+Default: `sort=created_at&order=desc` (newest first).
 
-### ffprobe failed
+## Browser compatibility rules
 
-- Check logs in `/volume1/docker/video-player/logs/app.log`
-- Ensure source file is not corrupted
-- Ensure container image includes `ffmpeg` package
+| Format | Status |
+|--------|--------|
+| MP4 + H.264 + AAC | ✓ direct_play |
+| WebM + VP8/VP9/AV1 + Opus/Vorbis | ✓ direct_play |
+| MOV, MKV | ⚠ may_not_play |
+| HEVC/H.265, DTS audio | ✗ needs_conversion |
+| AVI | ✗ needs_conversion |
 
-### Video does not play in browser
+## Duplicate detection mode
 
-- Check browser codec support
-- Try MP4/H.264/AAC files first
-- Confirm stream endpoint response headers include range headers
+Duplicate detection in Phase 1.5 is a **fast preliminary fingerprint**, not byte-level proof.
 
-### Thumbnails missing
+It uses already indexed metadata such as:
+- file size
+- duration
+- width / height
+- video codec
+- audio codec
+- extension / container
 
-- Check write access to `/volume1/docker/video-player/thumbnails`
-- Check `ffmpeg` errors in app logs
-- Trigger scan again after fixing permissions
+### Strict mode
+- Same file size
+- Same rounded duration
+- Same width
+- Same height
+
+Use this mode first when you want the safest candidate groups.
+
+
+### Important limitation
+- Duplicate detection is **candidate-based only** in this phase
+- It does **not** guarantee files are byte-identical
+- A future phase may add optional SHA256 hashing for exact confirmation
 
 ## Running backend tests locally
 
@@ -182,51 +278,52 @@ cd backend
 PYTHONPATH=. pytest
 ```
 
+## Troubleshooting
+
+### No videos shown after scan
+
+- Check scan status for errors (scan bar shows error count)
+- Verify `VIDEO_LIBRARY_PATH` is correctly mounted in `docker-compose.yml`
+- Check logs: `/volume1/docker/video-player/logs/app.log`
+
+### Video does not play
+
+- Check the compatibility badge (yellow or red = may not play directly)
+- Try an MP4/H.264/AAC file first
+- Check browser console for errors
+
+### Port 8080 already in use
+
+- Change the host port in `docker-compose.yml`: e.g. `"8081:8080"`
+
+### Thumbnails missing
+
+- Check write permissions on `/volume1/docker/video-player/thumbnails`
+- Check logs for `ffmpeg` errors
+- Re-scan after fixing permissions
+
+### Progress not saved
+
+- Check browser console for network errors on `/api/videos/{id}/progress`
+- Ensure the container is running (`docker compose ps`)
+
 ## Future roadmap
 
-### Phase 2: Better library
-
-- Scheduled automatic scan
-- Folder navigation
-- Tags and favorites
-- Continue watching / watch history
-- Recently added and better sorting/filtering
-- Duplicate detection and metadata editing
-
-### Phase 3: HLS and compatibility
-
-- HLS support for unsupported direct-play formats
+### Phase 2: HLS and transcoding
+- HLS support for unsupported formats
+- Background pre-transcoding
 - `hls.js` in frontend
-- Background pre-transcoding profiles (1080p/720p/480p)
-- Caching strategy to avoid live transcoding on weak NAS
 
-### Phase 4: User features
-
+### Phase 3: User features
 - Authentication and multiple users
 - Per-user watch history
-- Parental control and private videos
-- User preferences
 
-### Phase 5: Advanced media
-
-- Subtitles (`.srt`, `.vtt`, embedded extraction)
+### Phase 4: Advanced media
+- Subtitles (`.srt`, `.vtt`, embedded)
 - Audio track selection
-- Chapters and timeline previews
-- Resume playback
-- Playlists and smart collections
+- Playlists
 
-### Phase 6: Production hardening
-
-- Background worker and queue
-- Task status API
-- Better error reporting
-- Backup/restore for SQLite
+### Phase 5: Production hardening
+- Scheduled automatic scan
 - Reverse proxy and HTTPS support
-- Optional secure external access
-
-### Phase 7: Mobile/TV experience
-
-- PWA support
-- Better mobile UI
-- TV browser controls and remote navigation
-
+- Backup/restore for SQLite
