@@ -7,10 +7,10 @@ export function SearchBar({ value, onChange }: Props) {
   return (
     <input
       className="search-input"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
+      type="search"
       placeholder="Search videos..."
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
     />
   );
 }
-

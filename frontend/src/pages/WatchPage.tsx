@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { fetchVideo } from "../api/client";
+import { useParams } from "react-router-dom";
+import { fetchVideo, getProgress } from "../api/client";
+import { CompatibilityBadge } from "../components/CompatibilityBadge";
 import { VideoPlayer } from "../components/VideoPlayer";
-import type { VideoDetail } from "../types/video";
+import type { VideoDetail, WatchProgress } from "../types/video";
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return "Unknown";
@@ -29,59 +30,90 @@ function formatSize(bytes: number): string {
 export function WatchPage() {
   const { id } = useParams();
   const [video, setVideo] = useState<VideoDetail | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [progress, setProgress] = useState<WatchProgress | null>(null);
+  const [initialPosition, setInitialPosition] = useState<number>(0);
+  const [askResume, setAskResume] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [playerError, setPlayerError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function loadVideo() {
+    async function load() {
       if (!id) {
         setError("Missing video id");
         setLoading(false);
         return;
       }
-
       try {
         setLoading(true);
-        const data = await fetchVideo(id);
-        setVideo(data);
+        const [vid, prog] = await Promise.all([fetchVideo(id), getProgress(Number(id))]);
+        setVideo(vid);
+        setProgress(prog);
+        // Show resume prompt if position is meaningful and not completed
+        if (prog.position_seconds > 5 && !prog.completed) {
+          setAskResume(true);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load video");
       } finally {
         setLoading(false);
       }
     }
-
-    void loadVideo();
+    void load();
   }, [id]);
 
-  if (loading) return <div className="page status">Loading video...</div>;
-  if (error || !video) return <div className="page error">{error || "Video not found"}</div>;
+  if (loading) return <div className="page status">Loading video…</div>;
+  if (error || !video) return <div className="page error">{error ?? "Video not found"}</div>;
+
+  const handleResume = () => {
+    setInitialPosition(progress?.position_seconds ?? 0);
+    setAskResume(false);
+  };
+
+  const handleFromBeginning = () => {
+    setInitialPosition(0);
+    setAskResume(false);
+  };
 
   return (
-    <div className="page">
+    <div className="page watch-page">
       <div className="watch-header">
-        <Link className="back-link" to="/">
-          Back to library
-        </Link>
-        <h1>{video.title}</h1>
+        <div className="watch-header-left">
+          <a className="back-link" href="/">← Library</a>
+          <h1 className="watch-title">{video.title}</h1>
+        </div>
+        <CompatibilityBadge
+          status={video.compatibility_status}
+          reason={video.compatibility_reason}
+          showTooltip
+        />
       </div>
 
-      <VideoPlayer videoId={video.id} onError={() => setPlayerError("Video failed to load in browser")} />
-      {playerError && <div className="error">{playerError}</div>}
+      {askResume && progress && (
+        <div className="resume-banner">
+          <span>Continue from {formatDuration(progress.position_seconds)}?</span>
+          <button className="btn-primary" onClick={handleResume}>Resume</button>
+          <button className="btn-secondary" onClick={handleFromBeginning}>Start from beginning</button>
+        </div>
+      )}
+
+      <VideoPlayer video={video} initialPosition={initialPosition} />
 
       <div className="meta-grid">
         <div>
           <strong>Duration:</strong> {formatDuration(video.duration)}
         </div>
         <div>
-          <strong>Resolution:</strong> {video.width && video.height ? `${video.width}x${video.height}` : "Unknown"}
+          <strong>Resolution:</strong>{" "}
+          {video.width && video.height ? `${video.width}×${video.height}` : "Unknown"}
         </div>
         <div>
-          <strong>Video codec:</strong> {video.video_codec || "Unknown"}
+          <strong>Video codec:</strong> {video.video_codec ?? "Unknown"}
         </div>
         <div>
-          <strong>Audio codec:</strong> {video.audio_codec || "Unknown"}
+          <strong>Audio codec:</strong> {video.audio_codec ?? "Unknown"}
+        </div>
+        <div>
+          <strong>Container:</strong> {video.extension.toUpperCase()}
         </div>
         <div>
           <strong>File size:</strong> {formatSize(video.size)}
@@ -89,8 +121,17 @@ export function WatchPage() {
         <div>
           <strong>Filename:</strong> {video.filename}
         </div>
+        {video.folder_path && (
+          <div>
+            <strong>Folder:</strong> {video.folder_path}
+          </div>
+        )}
+        {video.compatibility_reason && (
+          <div className="compat-detail">
+            <strong>Compatibility note:</strong> {video.compatibility_reason}
+          </div>
+        )}
       </div>
     </div>
   );
 }
-

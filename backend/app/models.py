@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -24,9 +24,30 @@ class Video(Base):
     video_codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
     audio_codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Folder path relative to VIDEO_LIBRARY_PATH; empty string for root
+    folder_path: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    # Browser compatibility
+    compatibility_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    compatibility_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
     indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
+
+class WatchProgress(Base):
+    """Global (single-user) watch progress for each video."""
+
+    __tablename__ = "watch_progress"
+    __table_args__ = (UniqueConstraint("video_id", name="uq_watch_progress_video_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    video_id: Mapped[int] = mapped_column(Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False)
+    position_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    duration_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    percent_watched: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_watched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
