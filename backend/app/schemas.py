@@ -94,3 +94,72 @@ class VideoWithProgress(VideoListItem):
 class FolderOut(BaseModel):
     folder_path: str  # relative path, empty string for root
     video_count: int
+
+
+class DuplicateScanStartResponse(BaseModel):
+    status: str
+    mode: str
+
+
+class DuplicateScanStatusOut(BaseModel):
+    status: str
+    mode: str
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
+    videos_checked: int
+    candidate_groups_found: int
+    duplicate_candidates_found: int
+    current_step: Optional[str]
+    errors: list[str]
+    last_result_summary: dict[str, int | str | None] | None = None
+
+
+class DuplicateFingerprintOut(BaseModel):
+    mode: str
+    version: str
+    file_size: int
+    duration_seconds: int | None
+    width: int | None
+    height: int | None
+    video_codec: str | None
+    audio_codec: str | None
+    extension: str | None
+    normalized_title: str | None
+
+
+class DuplicateGroupVideoOut(BaseModel):
+    id: int
+    title: str
+    filename: str
+    relative_path: str
+    size: int
+    duration: float | None
+    width: int | None
+    height: int | None
+    video_codec: str | None
+    audio_codec: str | None
+    extension: str
+    thumbnail_url: str | None
+    watch_url: str
+
+
+class DuplicateGroupOut(BaseModel):
+    group_id: str
+    confidence: str
+    reason: str
+    candidate_count: int
+    total_size: int
+    potential_saving: int
+    fingerprint: DuplicateFingerprintOut
+    videos: list[DuplicateGroupVideoOut]
+
+
+class DuplicateSummaryOut(BaseModel):
+    last_scan_status: str
+    candidate_groups_found: int
+    duplicate_candidates_found: int
+    potential_saving: int
+    last_scan_at: str | None
+    mode: str
+
+

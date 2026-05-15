@@ -52,6 +52,13 @@ Mini-YouTube style local web video player for Synology NAS.
 - Right-click / copy link / open in new tab work as expected
 - Library page stays open in original tab
 
+### Duplicate candidate detection
+- Separate **Scan Duplicates** action, independent from the normal library scan
+- Finds **likely duplicate candidates** using a fast metadata fingerprint
+- Does **not** read full files and does **not** calculate SHA256 in this phase
+- Shows duplicate groups, confidence, reason, thumbnails, relative paths, and potential space saving
+- Diagnostic only: duplicate scan does **not** delete, move, rename, or modify files
+
 ## Required NAS folders
 
 Create these folders on your NAS before first run:
@@ -165,9 +172,11 @@ Open the app: `http://NAS_IP:8080`
 3. Browse **All Videos** (newest first by default)
 4. Use **Folders** tab to navigate by directory
 5. Use **Continue Watching** tab to resume in-progress videos
-6. Click any video card → opens watch page in a **new tab**
-7. Video resumes from last position automatically
-8. Close the tab — progress is saved
+6. Use **Duplicates** tab to review likely duplicate candidates
+7. Click **Scan Duplicates** to run a separate duplicate scan
+8. Click any video card → opens watch page in a **new tab**
+9. Video resumes from last position automatically
+10. Close the tab — progress is saved
 
 ## API endpoints
 
@@ -198,6 +207,14 @@ Open the app: `http://NAS_IP:8080`
 | `GET` | `/api/scan/status` | Current scan status |
 | `GET` | `/api/scan/last-result` | Last scan result |
 
+### Duplicates
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/duplicates/scan` | Start duplicate candidate scan (strict mode) |
+| `GET` | `/api/duplicates/status` | Current duplicate scan status |
+| `GET` | `/api/duplicates/groups` | Latest duplicate candidate groups |
+| `GET` | `/api/duplicates/summary` | Latest duplicate summary |
+
 ### Misc
 | Method | Path | Description |
 |--------|------|-------------|
@@ -227,6 +244,32 @@ Default: `sort=created_at&order=desc` (newest first).
 | MOV, MKV | ⚠ may_not_play |
 | HEVC/H.265, DTS audio | ✗ needs_conversion |
 | AVI | ✗ needs_conversion |
+
+## Duplicate detection mode
+
+Duplicate detection in Phase 1.5 is a **fast preliminary fingerprint**, not byte-level proof.
+
+It uses already indexed metadata such as:
+- file size
+- duration
+- width / height
+- video codec
+- audio codec
+- extension / container
+
+### Strict mode
+- Same file size
+- Same rounded duration
+- Same width
+- Same height
+
+Use this mode first when you want the safest candidate groups.
+
+
+### Important limitation
+- Duplicate detection is **candidate-based only** in this phase
+- It does **not** guarantee files are byte-identical
+- A future phase may add optional SHA256 hashing for exact confirmation
 
 ## Running backend tests locally
 

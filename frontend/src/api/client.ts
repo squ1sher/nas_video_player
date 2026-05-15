@@ -1,4 +1,8 @@
 import type {
+  DuplicateGroup,
+  DuplicateMode,
+  DuplicateScanStatus,
+  DuplicateSummary,
   FolderInfo,
   ScanStartedResponse,
   ScanStatus,
@@ -85,6 +89,30 @@ export async function getContinueWatching(): Promise<VideoWithProgress[]> {
 
 export async function getFolders(): Promise<FolderInfo[]> {
   return handleResponse<FolderInfo[]>(await fetch(`${API_BASE}/folders`));
+}
+
+export async function startDuplicateScan(): Promise<{ status: string; mode: DuplicateMode }> {
+  return handleResponse<{ status: string; mode: DuplicateMode }>(
+    await fetch(`${API_BASE}/duplicates/scan`, { method: "POST" })
+  );
+}
+
+export async function getDuplicateStatus(): Promise<DuplicateScanStatus> {
+  return handleResponse<DuplicateScanStatus>(
+    await fetch(`${API_BASE}/duplicates/status?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function getDuplicateGroups(): Promise<DuplicateGroup[]> {
+  return handleResponse<DuplicateGroup[]>(
+    await fetch(`${API_BASE}/duplicates/groups?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function getDuplicateSummary(): Promise<DuplicateSummary> {
+  return handleResponse<DuplicateSummary>(
+    await fetch(`${API_BASE}/duplicates/summary?t=${Date.now()}`, { cache: "no-store" })
+  );
 }
 
 export function getDownloadUrl(videoId: number): string {

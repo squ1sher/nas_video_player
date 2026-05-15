@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.database import Base, engine
 # Import all models so create_all picks them up
 import app.models  # noqa: F401
+from app.routes.duplicates import router as duplicates_router
 from app.routes.folders import router as folders_router
 from app.routes.health import router as health_router
 from app.routes.progress import router as progress_router
@@ -31,6 +32,7 @@ app.include_router(scan_router)
 # is matched before /{video_id}
 app.include_router(progress_router)
 app.include_router(folders_router)
+app.include_router(duplicates_router)
 app.include_router(videos_router)
 
 

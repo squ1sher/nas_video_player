@@ -71,3 +71,70 @@ export type FolderInfo = {
   folder_path: string;
   video_count: number;
 };
+
+export type DuplicateMode = "strict";
+
+export type DuplicateConfidence = "exact_metadata_match" | "high" | "medium";
+
+export type DuplicateScanStatus = {
+  status: "idle" | "running" | "completed" | "failed";
+  mode: DuplicateMode;
+  started_at: string | null;
+  finished_at: string | null;
+  videos_checked: number;
+  candidate_groups_found: number;
+  duplicate_candidates_found: number;
+  current_step: string | null;
+  errors: string[];
+  last_result_summary: Record<string, string | number | null> | null;
+};
+
+export type DuplicateFingerprint = {
+  mode: DuplicateMode;
+  version: string;
+  file_size: number;
+  duration_seconds: number | null;
+  width: number | null;
+  height: number | null;
+  video_codec: string | null;
+  audio_codec: string | null;
+  extension: string | null;
+  normalized_title: string | null;
+};
+
+export type DuplicateGroupVideo = {
+  id: number;
+  title: string;
+  filename: string;
+  relative_path: string;
+  size: number;
+  duration: number | null;
+  width: number | null;
+  height: number | null;
+  video_codec: string | null;
+  audio_codec: string | null;
+  extension: string;
+  thumbnail_url: string | null;
+  watch_url: string;
+};
+
+export type DuplicateGroup = {
+  group_id: string;
+  confidence: DuplicateConfidence;
+  reason: string;
+  candidate_count: number;
+  total_size: number;
+  potential_saving: number;
+  fingerprint: DuplicateFingerprint;
+  videos: DuplicateGroupVideo[];
+};
+
+export type DuplicateSummary = {
+  last_scan_status: "idle" | "running" | "completed" | "failed";
+  candidate_groups_found: number;
+  duplicate_candidates_found: number;
+  potential_saving: number;
+  last_scan_at: string | null;
+  mode: DuplicateMode;
+};
+
