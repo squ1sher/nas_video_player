@@ -8,7 +8,11 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.database import Base, engine
+# Import all models so create_all picks them up
+import app.models  # noqa: F401
+from app.routes.folders import router as folders_router
 from app.routes.health import router as health_router
+from app.routes.progress import router as progress_router
 from app.routes.scan import router as scan_router
 from app.routes.videos import router as videos_router
 from app.utils.logging_config import configure_logging
@@ -19,10 +23,14 @@ configure_logging(settings.logs_path)
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="NAS Video Player", version="0.1.0")
+app = FastAPI(title="NAS Video Player", version="0.2.0")
 
 app.include_router(health_router)
 app.include_router(scan_router)
+# progress_router MUST come before videos_router so /continue-watching
+# is matched before /{video_id}
+app.include_router(progress_router)
+app.include_router(folders_router)
 app.include_router(videos_router)
 
 
@@ -59,4 +67,3 @@ def serve_spa(full_path: str) -> Response:
     if index_file.exists():
         return FileResponse(index_file)
     return JSONResponse({"message": "Frontend build not found"}, status_code=404)
-

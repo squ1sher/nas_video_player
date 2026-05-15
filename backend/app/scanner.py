@@ -5,9 +5,11 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.compatibility import get_compatibility
 from app.config import Settings
 from app.media_probe import probe_video
-from app.models import Video
+from app.models import Video, WatchProgress
+from app.scan_status import fail_scan, finish_scan, increment_progress, start_scan, update_current_file
 from app.thumbnails import ensure_thumbnail
 from app.utils.files import VIDEO_EXTENSIONS, is_video_file
 
@@ -26,6 +28,13 @@ def iter_video_files(root: Path) -> list[Path]:
     return [path for path in root.rglob("*") if path.is_file() and is_video_file(path)]
 
 
+def _compute_folder_path(file_path: Path, root: Path) -> str:
+    """Return the folder path relative to root, using forward slashes. Empty string for root."""
+    parent_relative = file_path.parent.relative_to(root)
+    folder = parent_relative.as_posix()
+    return "" if folder == "." else folder
+
+
 def scan_video_library(db: Session, settings: Settings) -> ScanResult:
     result = ScanResult()
     root = settings.video_library_path
@@ -37,13 +46,34 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
         result.errors.append(msg)
         return result
 
+    # ── Step 1: remove DB records whose source file no longer exists ─────────
+    all_db_videos = db.query(Video).all()
+    removed = 0
+    for db_video in all_db_videos:
+        try:
+            disk_path = root / db_video.relative_path
+            if not disk_path.exists() or not disk_path.is_file():
+                logger.info("Source file missing, removing from index: %s", db_video.relative_path)
+                db.query(WatchProgress).filter(WatchProgress.video_id == db_video.id).delete()
+                db.delete(db_video)
+                removed += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Error checking file for removal %s: %s", db_video.relative_path, exc)
+    if removed:
+        db.commit()
+        logger.info("Removed %d stale DB records", removed)
+
+    # ── Step 2: index new / changed files ───────────────────────────────────
     files = iter_video_files(root)
     logger.info("Found %d candidate files", len(files))
 
     for file_path in files:
         result.scanned += 1
+        increment_progress(scanned_inc=1)
+        update_current_file(str(file_path))
         try:
             relative_path = file_path.relative_to(root).as_posix()
+            folder_path = _compute_folder_path(file_path, root)
             stat = file_path.stat()
             existing = db.query(Video).filter(Video.relative_path == relative_path).first()
             unchanged = (
@@ -56,6 +86,7 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
 
             logger.info("Indexing file: %s", relative_path)
             probe = probe_video(file_path)
+            compat = get_compatibility(file_path.suffix.lower(), probe.video_codec, probe.audio_codec)
             thumb_path = ensure_thumbnail(file_path, settings.thumbnails_path, relative_path)
             thumb_relative = thumb_path.name if thumb_path else None
 
@@ -74,10 +105,14 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                     video_codec=probe.video_codec,
                     audio_codec=probe.audio_codec,
                     thumbnail_path=thumb_relative,
+                    folder_path=folder_path,
+                    compatibility_status=compat["status"],
+                    compatibility_reason=compat["reason"],
                     indexed_at=datetime.now(timezone.utc),
                 )
                 db.add(video)
                 result.added += 1
+                increment_progress(added_inc=1)
             else:
                 existing.title = file_path.stem
                 existing.filename = file_path.name
@@ -91,12 +126,17 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                 existing.video_codec = probe.video_codec
                 existing.audio_codec = probe.audio_codec
                 existing.thumbnail_path = thumb_relative
+                existing.folder_path = folder_path
+                existing.compatibility_status = compat["status"]
+                existing.compatibility_reason = compat["reason"]
                 existing.indexed_at = datetime.now(timezone.utc)
                 result.updated += 1
+                increment_progress(updated_inc=1)
         except Exception as exc:  # noqa: BLE001
             error_msg = f"Failed to index {file_path}: {exc}"
             logger.exception(error_msg)
             result.errors.append(error_msg)
+            increment_progress(error=error_msg)
 
     db.commit()
     logger.info(
@@ -109,6 +149,21 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
     return result
 
 
+def scan_video_library_background(settings: Settings) -> None:
+    """Run scan in a background task with its own database session."""
+    from app.database import SessionLocal
+
+    start_scan()
+    db = SessionLocal()
+    try:
+        result = scan_video_library(db, settings)
+        finish_scan(result.scanned, result.added, result.updated, result.errors)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Background scan failed: %s", exc)
+        fail_scan(str(exc))
+    finally:
+        db.close()
+
+
 def is_supported_extension(extension: str) -> bool:
     return extension.lower() in VIDEO_EXTENSIONS
-
