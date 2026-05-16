@@ -1,18 +1,43 @@
 import { useEffect, useRef, useState } from "react";
+import Hls from "hls.js";
+
 import { updateProgress } from "../api/client";
 import { CompatibilityBadge } from "./CompatibilityBadge";
 import type { VideoDetail } from "../types/video";
 
 type Props = {
   video: VideoDetail;
+  sourceType: "hls" | "original" | "none";
+  streamUrl: string | null;
+  selectedQuality: string;
+  onAvailableQualities?: (qualities: string[]) => void;
   initialPosition?: number;
   onError?: () => void;
 };
 
-export function VideoPlayer({ video, initialPosition = 0, onError }: Props) {
+export function VideoPlayer({
+  video,
+  sourceType,
+  streamUrl,
+  selectedQuality,
+  onAvailableQualities,
+  initialPosition = 0,
+  onError,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const [playerError, setPlayerError] = useState(false);
+
+  const applyHlsQuality = (hls: Hls, quality: string) => {
+    if (quality === "auto") {
+      hls.currentLevel = -1;
+      return;
+    }
+    const qualityHeight = Number(quality.replace("p", ""));
+    const idx = hls.levels.findIndex((level) => level.height === qualityHeight);
+    if (idx >= 0) hls.currentLevel = idx;
+  };
 
   const saveProgress = (el: HTMLVideoElement, keepalive = false) => {
     if (!el.duration || el.duration === Infinity || el.currentTime === 0) return;
@@ -34,6 +59,68 @@ export function VideoPlayer({ video, initialPosition = 0, onError }: Props) {
       intervalRef.current = null;
     }
   };
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+
+    setPlayerError(false);
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    if (!streamUrl || sourceType === "none") {
+      el.removeAttribute("src");
+      el.load();
+      return;
+    }
+
+    if (sourceType === "hls") {
+      if (el.canPlayType("application/vnd.apple.mpegurl")) {
+        el.src = streamUrl;
+      } else if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+        });
+        hlsRef.current = hls;
+        hls.loadSource(streamUrl);
+        hls.attachMedia(el);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          const mapped = Array.from(new Set(hls.levels.map((level) => `${level.height}p`)))
+            .sort((a, b) => Number(a.replace("p", "")) - Number(b.replace("p", "")));
+          onAvailableQualities?.(["auto", ...mapped]);
+          applyHlsQuality(hls, selectedQuality);
+        });
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) {
+            setPlayerError(true);
+            onError?.();
+          }
+        });
+      } else {
+        setPlayerError(true);
+        onError?.();
+      }
+    } else {
+      el.src = streamUrl;
+      onAvailableQualities?.(["original"]);
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [sourceType, streamUrl, onAvailableQualities, onError, selectedQuality]);
+
+  useEffect(() => {
+    const hls = hlsRef.current;
+    if (!hls || sourceType !== "hls") return;
+    applyHlsQuality(hls, selectedQuality);
+  }, [selectedQuality, sourceType]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -113,8 +200,7 @@ export function VideoPlayer({ video, initialPosition = 0, onError }: Props) {
       ref={videoRef}
       className="video-player"
       controls
-      preload="metadata"
-      src={`/api/videos/${video.id}/stream`}
+      preload="auto"
       onError={() => {
         setPlayerError(true);
         onError?.();

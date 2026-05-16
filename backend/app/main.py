@@ -14,6 +14,7 @@ from app.migrations import run_migrations
 from app.routes.duplicates import router as duplicates_router
 from app.routes.folders import router as folders_router
 from app.routes.health import router as health_router
+from app.routes.hls import global_hls_router, video_hls_router
 from app.routes.library import router as library_router
 from app.routes.media_profiles import router as media_profiles_router
 from app.routes.progress import router as progress_router
@@ -38,6 +39,8 @@ app.include_router(media_profiles_router)
 app.include_router(progress_router)
 app.include_router(folders_router)
 app.include_router(duplicates_router)
+app.include_router(global_hls_router)
+app.include_router(video_hls_router)
 app.include_router(videos_router)
 
 

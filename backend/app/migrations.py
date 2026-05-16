@@ -158,5 +158,87 @@ def run_migrations(engine: Engine) -> None:
     for col, col_def in media_profile_migrations:
         _add_column_if_missing(engine, "media_profiles", col, col_def)
 
+    # ── hls_jobs table ────────────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS hls_jobs (
+                    id INTEGER PRIMARY KEY,
+                    video_id INTEGER NOT NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    started_at DATETIME NULL,
+                    finished_at DATETIME NULL,
+                    progress_percent FLOAT NULL,
+                    current_quality VARCHAR(32) NULL,
+                    error_message TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    _create_index_if_missing(engine, "ix_hls_jobs_video_id", "hls_jobs", "video_id")
+    _create_index_if_missing(engine, "ix_hls_jobs_status", "hls_jobs", "status")
+
+    hls_job_migrations = [
+        ("started_at", "DATETIME NULL"),
+        ("finished_at", "DATETIME NULL"),
+        ("progress_percent", "FLOAT NULL"),
+        ("current_quality", "VARCHAR(32) NULL"),
+        ("error_message", "TEXT NULL"),
+        ("updated_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+    ]
+    for col, col_def in hls_job_migrations:
+        _add_column_if_missing(engine, "hls_jobs", col, col_def)
+
+    # ── video_variants table ──────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS video_variants (
+                    id INTEGER PRIMARY KEY,
+                    video_id INTEGER NOT NULL,
+                    variant_type VARCHAR(32) NOT NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    quality_label VARCHAR(32) NULL,
+                    playlist_path VARCHAR(1024) NULL,
+                    relative_output_path VARCHAR(1024) NULL,
+                    stream_url VARCHAR(1024) NULL,
+                    width INTEGER NULL,
+                    height INTEGER NULL,
+                    bitrate INTEGER NULL,
+                    file_size INTEGER NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    completed_at DATETIME NULL,
+                    error_message TEXT NULL
+                )
+                """
+            )
+        )
+
+    _create_index_if_missing(engine, "ix_video_variants_video_id", "video_variants", "video_id")
+    _create_index_if_missing(engine, "ix_video_variants_variant_type", "video_variants", "variant_type")
+    _create_index_if_missing(engine, "ix_video_variants_status", "video_variants", "status")
+
+    video_variant_migrations = [
+        ("quality_label", "VARCHAR(32) NULL"),
+        ("playlist_path", "VARCHAR(1024) NULL"),
+        ("relative_output_path", "VARCHAR(1024) NULL"),
+        ("stream_url", "VARCHAR(1024) NULL"),
+        ("width", "INTEGER NULL"),
+        ("height", "INTEGER NULL"),
+        ("bitrate", "INTEGER NULL"),
+        ("file_size", "INTEGER NULL"),
+        ("completed_at", "DATETIME NULL"),
+        ("error_message", "TEXT NULL"),
+        ("updated_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+    ]
+    for col, col_def in video_variant_migrations:
+        _add_column_if_missing(engine, "video_variants", col, col_def)
+
     logger.info("Database migrations applied successfully")
 

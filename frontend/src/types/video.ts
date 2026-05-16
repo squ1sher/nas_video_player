@@ -267,3 +267,46 @@ export type MediaProfileDetail = MediaProfileItem & {
   videos: VideoListItem[];
 };
 
+export type HlsPrepareResponse = {
+  status: "started" | "completed";
+  video_id: number;
+  job_id: number | null;
+};
+
+export type HlsVideoStatus = {
+  video_id: number;
+  status: "idle" | "pending" | "running" | "completed" | "failed" | "cancelled";
+  progress_percent: number | null;
+  current_quality: string | null;
+  available_qualities: string[];
+  master_playlist_url: string | null;
+  error_message: string | null;
+};
+
+export type HlsJob = {
+  id: number;
+  video_id: number;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  progress_percent: number | null;
+  current_quality: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type HlsGlobalStatus = {
+  running: number;
+  max_concurrent: number;
+  recent_failed: number;
+  recent_completed: number;
+};
+
+export type PlaybackSource = {
+  source_type: "hls" | "original" | "none";
+  stream_url: string | null;
+  available_qualities: string[];
+  reason: string;
+};
+

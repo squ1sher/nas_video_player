@@ -301,3 +301,51 @@ class DuplicateSummaryOut(BaseModel):
     mode: str
 
 
+class HlsPrepareIn(BaseModel):
+    force: bool = False
+    qualities: list[str] | None = None
+
+
+class HlsPrepareOut(BaseModel):
+    status: str
+    video_id: int
+    job_id: int | None = None
+
+
+class HlsVideoStatusOut(BaseModel):
+    video_id: int
+    status: str
+    progress_percent: float | None = None
+    current_quality: str | None = None
+    available_qualities: list[str] = []
+    master_playlist_url: str | None = None
+    error_message: str | None = None
+
+
+class HlsJobOut(BaseModel):
+    id: int
+    video_id: int
+    status: str
+    progress_percent: float | None = None
+    current_quality: str | None = None
+    error_message: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class HlsGlobalStatusOut(BaseModel):
+    running: int
+    max_concurrent: int
+    recent_failed: int
+    recent_completed: int
+
+
+class PlaybackSourceOut(BaseModel):
+    source_type: str
+    stream_url: str | None
+    available_qualities: list[str]
+    reason: str
+
+

@@ -15,6 +15,7 @@ def setup_test_db(tmp_path: Path):
     os.environ["DATABASE_PATH"] = str(data_dir / "app.db")
     os.environ["THUMBNAILS_PATH"] = str(tmp_path / "thumbnails")
     os.environ["CACHE_PATH"] = str(tmp_path / "cache")
+    os.environ["HLS_OUTPUT_PATH"] = str(tmp_path / "cache" / "hls")
     os.environ["LOGS_PATH"] = str(tmp_path / "logs")
 
     from app.config import get_settings

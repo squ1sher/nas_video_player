@@ -64,6 +64,20 @@ Mini-YouTube style local web video player for Synology NAS.
 - Grouping is applied after search and filters.
 - Every group can be collapsed/expanded.
 
+### Pre-generated HLS streaming (manual per-video)
+- HLS variants are prepared **on demand** for a selected video.
+- This phase does **not** use live transcoding during playback requests.
+- Original video files are not modified, moved, or deleted by HLS preparation.
+- HLS output is stored only under cache path:
+  - Container: `/app/cache/hls`
+  - NAS: `/volume1/docker/video-player/cache/hls`
+- Quality targets:
+  - `480p` (~1200k video, 96k audio)
+  - `720p` (~2500k video, 128k audio)
+  - `1080p` (~5000k video, 160k audio)
+- Upscaling is disabled (qualities above source resolution are skipped).
+- Default DS923+ recommendation: one HLS job at a time.
+
 ### Open video in new tab
 - All video cards open the watch page in a **new browser tab**
 - Uses `<a target="_blank" rel="noopener noreferrer">`
@@ -201,6 +215,7 @@ nas_video_player/
 | `DATABASE_PATH`      | `/app/data/app.db`   | SQLite database file path       |
 | `THUMBNAILS_PATH`    | `/app/thumbnails`    | Thumbnails output directory     |
 | `CACHE_PATH`         | `/app/cache`         | Cache directory                 |
+| `HLS_OUTPUT_PATH`    | `/app/cache/hls`     | HLS output directory            |
 | `LOGS_PATH`          | `/app/logs`          | Log file directory              |
 | `APP_HOST`           | `0.0.0.0`            | Bind address                    |
 | `APP_PORT`           | `8080`               | Bind port                       |
@@ -209,6 +224,10 @@ nas_video_player/
 | `EXCLUDED_EXTENSIONS` | `.txt,.nfo,...`    | Comma-separated excluded extensions |
 | `MIN_MEDIA_FILE_SIZE_BYTES` | `1048576`   | Skip very small unknown files before probing |
 | `PROBE_UNKNOWN_EXTENSIONS` | `true`      | Probe unknown extensions in `probe`/`hybrid` |
+| `MAX_CONCURRENT_HLS_JOBS` | `1`        | Maximum simultaneous HLS preparation jobs |
+| `HLS_SEGMENT_SECONDS` | `4`           | HLS segment length (seconds) |
+| `HLS_FFMPEG_PRESET` | `veryfast`      | FFmpeg x264 preset for HLS preparation |
+| `HLS_CRF` | `23`                    | FFmpeg CRF for HLS preparation |
 
 ## Build and run
 
@@ -246,8 +265,14 @@ Open the app: `http://NAS_IP:8080`
 | `GET` | `/api/videos/{id}` | Video detail |
 | `GET` | `/api/videos/{id}/thumbnail` | Video thumbnail |
 | `GET` | `/api/videos/{id}/stream` | HTTP Range streaming |
+| `GET` | `/api/videos/{id}/playback-source` | Preferred playback source (`hls` or `original`) |
 | `POST` | `/api/videos/{id}/reprobe` | Re-run ffprobe for one indexed file |
 | `POST` | `/api/videos/{id}/thumbnail/regenerate` | Re-generate thumbnail for one file |
+| `POST` | `/api/videos/{id}/hls/prepare` | Start HLS preparation for one video |
+| `GET` | `/api/videos/{id}/hls/status` | HLS status for one video |
+| `GET` | `/api/videos/{id}/hls/master.m3u8` | HLS master playlist |
+| `GET` | `/api/videos/{id}/hls/{quality}/index.m3u8` | HLS quality playlist |
+| `GET` | `/api/videos/{id}/hls/{quality}/{segment_name}` | HLS segment |
 
 `GET /api/videos` additionally supports optional filters:
 - `compatibility_status`
@@ -305,6 +330,8 @@ Open the app: `http://NAS_IP:8080`
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/health` | Health check |
+| `GET` | `/api/hls/jobs` | Recent HLS jobs |
+| `GET` | `/api/hls/status` | Global HLS queue status |
 
 ## Sort options
 
@@ -439,6 +466,10 @@ PYTHONPATH=. pytest
 - HLS support for unsupported formats
 - Background pre-transcoding
 - `hls.js` in frontend
+- Batch HLS preparation
+- Scheduled overnight HLS preparation
+- HLS cache cleanup policies
+- Favorites / watch later / playlists / tags / manual metadata
 
 ### Phase 3: User features
 - Authentication and multiple users

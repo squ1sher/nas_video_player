@@ -1,16 +1,19 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   deleteVideo,
   fetchVideo,
+  getPlaybackSource,
+  getVideoHlsStatus,
   getDownloadUrl,
   getProgress,
+  prepareVideoHls,
   regenerateThumbnail,
   reprobeVideo,
 } from "../api/client";
 import { CompatibilityBadge } from "../components/CompatibilityBadge";
 import { VideoPlayer } from "../components/VideoPlayer";
-import type { VideoDetail, WatchProgress } from "../types/video";
+import type { HlsVideoStatus, PlaybackSource, VideoDetail, WatchProgress } from "../types/video";
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return "Unknown";
@@ -46,6 +49,17 @@ export function WatchPage() {
   const [reprobeBusy, setReprobeBusy] = useState(false);
   const [thumbnailBusy, setThumbnailBusy] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [playbackSource, setPlaybackSource] = useState<PlaybackSource | null>(null);
+  const [hlsStatus, setHlsStatus] = useState<HlsVideoStatus | null>(null);
+  const [hlsBusy, setHlsBusy] = useState(false);
+  const [selectedQuality, setSelectedQuality] = useState("auto");
+  const [playerQualities, setPlayerQualities] = useState<string[]>([]);
+
+  const loadPlaybackData = useCallback(async (videoId: number) => {
+    const [source, status] = await Promise.all([getPlaybackSource(videoId), getVideoHlsStatus(videoId)]);
+    setPlaybackSource(source);
+    setHlsStatus(status);
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -56,9 +70,11 @@ export function WatchPage() {
       }
       try {
         setLoading(true);
-        const [vid, prog] = await Promise.all([fetchVideo(id), getProgress(Number(id))]);
+        const numericId = Number(id);
+        const [vid, prog] = await Promise.all([fetchVideo(id), getProgress(numericId)]);
         setVideo(vid);
         setProgress(prog);
+        await loadPlaybackData(numericId);
         // Show resume prompt if position is meaningful and not completed
         if (prog.position_seconds > 5 && !prog.completed) {
           setAskResume(true);
@@ -70,7 +86,41 @@ export function WatchPage() {
       }
     }
     void load();
-  }, [id]);
+  }, [id, loadPlaybackData]);
+
+  useEffect(() => {
+    if (!video) return;
+    if (hlsStatus?.status !== "running" && hlsStatus?.status !== "pending") return;
+
+    const timer = setInterval(async () => {
+      try {
+        const status = await getVideoHlsStatus(video.id);
+        setHlsStatus(status);
+      } catch {
+        // non-critical polling failure
+      }
+    }, 2000);
+
+    return () => clearInterval(timer);
+  }, [video, hlsStatus?.status]);
+
+  const qualityOptions = useMemo(() => {
+    if (!playbackSource) return [];
+    if (playbackSource.source_type === "hls") {
+      const fromPlayer = playerQualities.length > 0 ? playerQualities : playbackSource.available_qualities;
+      return fromPlayer;
+    }
+    return ["original"];
+  }, [playbackSource, playerQualities]);
+
+  useEffect(() => {
+    if (!playbackSource) return;
+    if (playbackSource.source_type === "hls") {
+      setSelectedQuality((prev) => (prev === "original" ? "auto" : prev));
+      return;
+    }
+    setSelectedQuality("original");
+  }, [playbackSource]);
 
   if (loading) return <div className="page status">Loading video…</div>;
   if (error || !video) return <div className="page error">{error ?? "Video not found"}</div>;
@@ -130,6 +180,32 @@ export function WatchPage() {
     }
   };
 
+  const handlePrepareHls = async () => {
+    if (!video) return;
+    try {
+      setHlsBusy(true);
+      setActionMessage(null);
+      await prepareVideoHls(video.id, { force: false, qualities: ["480p", "720p", "1080p"] });
+      const status = await getVideoHlsStatus(video.id);
+      setHlsStatus(status);
+      setActionMessage("Preparing streaming versions...");
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : "Failed to start HLS preparation");
+    } finally {
+      setHlsBusy(false);
+    }
+  };
+
+  const handleUseHls = async () => {
+    if (!video) return;
+    try {
+      await loadPlaybackData(video.id);
+      setActionMessage("HLS ready. Switched playback source to HLS.");
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : "Failed to load HLS playback source");
+    }
+  };
+
   return (
     <div className="page watch-page">
       <div className="watch-header">
@@ -160,6 +236,46 @@ export function WatchPage() {
 
       {actionMessage && <div className="notice">{actionMessage}</div>}
 
+      <div className="diagnostics-section">
+        <div className="diagnostics-section-header">
+          <h3>Playback Source</h3>
+        </div>
+        <p><strong>Source:</strong> {playbackSource?.source_type ?? "loading"}</p>
+        <p><strong>Reason:</strong> {playbackSource?.reason ?? "Loading playback source..."}</p>
+        <p>
+          <strong>HLS status:</strong> {hlsStatus?.status ?? "idle"}
+          {hlsStatus?.current_quality ? ` (${hlsStatus.current_quality})` : ""}
+          {hlsStatus?.progress_percent !== null && hlsStatus?.progress_percent !== undefined
+            ? ` - ${Math.round(hlsStatus.progress_percent)}%`
+            : ""}
+        </p>
+        {hlsStatus?.status === "completed" && playbackSource?.source_type !== "hls" && (
+          <p className="card-warning">HLS ready. Click "Use HLS" to switch playback source.</p>
+        )}
+        {hlsStatus?.error_message && <p className="card-warning">{hlsStatus.error_message}</p>}
+        <div className="media-profiles-toolbar">
+          <label>
+            Quality
+            <select
+              value={selectedQuality}
+              onChange={(event) => setSelectedQuality(event.target.value)}
+              disabled={qualityOptions.length === 0 || playbackSource?.source_type === "none"}
+            >
+              {qualityOptions.map((quality) => (
+                <option key={quality} value={quality}>{quality}</option>
+              ))}
+            </select>
+          </label>
+          <button className="btn-secondary" onClick={handlePrepareHls} disabled={hlsBusy || hlsStatus?.status === "running"}>
+            {hlsStatus?.status === "running" ? "Preparing streaming versions..." : "Prepare streaming versions"}
+          </button>
+          {hlsStatus?.status === "completed" && playbackSource?.source_type !== "hls" && (
+            <button className="btn-secondary" onClick={handleUseHls}>Use HLS</button>
+          )}
+          {playbackSource?.source_type === "hls" && <span className="diagnostics-hint">HLS ready</span>}
+        </div>
+      </div>
+
       {askResume && progress && (
         <div className="resume-banner">
           <span>Continue from {formatDuration(progress.position_seconds)}?</span>
@@ -168,7 +284,14 @@ export function WatchPage() {
         </div>
       )}
 
-      <VideoPlayer video={video} initialPosition={initialPosition} />
+      <VideoPlayer
+        video={video}
+        sourceType={playbackSource?.source_type ?? "none"}
+        streamUrl={playbackSource?.stream_url ?? null}
+        selectedQuality={selectedQuality}
+        onAvailableQualities={setPlayerQualities}
+        initialPosition={initialPosition}
+      />
 
       {video.media_status === "probe_failed_possible_video" && (
         <div className="notice">

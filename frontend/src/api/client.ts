@@ -4,10 +4,15 @@ import type {
   DuplicateScanStatus,
   DuplicateSummary,
   FolderInfo,
+  HlsGlobalStatus,
+  HlsJob,
+  HlsPrepareResponse,
+  HlsVideoStatus,
   LibrarySummary,
   MediaProfileDetail,
   MediaProfileItem,
   ManualPlaybackStatus,
+  PlaybackSource,
   ScanStartedResponse,
   ScanStatus,
   VideoDetail,
@@ -67,6 +72,40 @@ export async function fetchVideos(params: {
 
 export async function fetchVideo(id: string | number): Promise<VideoDetail> {
   return handleResponse<VideoDetail>(await fetch(`${API_BASE}/videos/${id}`));
+}
+
+export async function getPlaybackSource(videoId: number): Promise<PlaybackSource> {
+  return handleResponse<PlaybackSource>(await fetch(`${API_BASE}/videos/${videoId}/playback-source?t=${Date.now()}`, { cache: "no-store" }));
+}
+
+export async function prepareVideoHls(
+  videoId: number,
+  body: { force?: boolean; qualities?: string[] } = {},
+): Promise<HlsPrepareResponse> {
+  return handleResponse<HlsPrepareResponse>(
+    await fetch(`${API_BASE}/videos/${videoId}/hls/prepare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        force: body.force ?? false,
+        qualities: body.qualities ?? ["480p", "720p", "1080p"],
+      }),
+    })
+  );
+}
+
+export async function getVideoHlsStatus(videoId: number): Promise<HlsVideoStatus> {
+  return handleResponse<HlsVideoStatus>(
+    await fetch(`${API_BASE}/videos/${videoId}/hls/status?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function getHlsJobs(): Promise<HlsJob[]> {
+  return handleResponse<HlsJob[]>(await fetch(`${API_BASE}/hls/jobs?t=${Date.now()}`, { cache: "no-store" }));
+}
+
+export async function getHlsGlobalStatus(): Promise<HlsGlobalStatus> {
+  return handleResponse<HlsGlobalStatus>(await fetch(`${API_BASE}/hls/status?t=${Date.now()}`, { cache: "no-store" }));
 }
 
 export async function runScan(): Promise<ScanStartedResponse> {

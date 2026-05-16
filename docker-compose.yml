@@ -15,9 +15,14 @@ services:
       - DATABASE_PATH=/app/data/app.db
       - THUMBNAILS_PATH=/app/thumbnails
       - CACHE_PATH=/app/cache
+      - HLS_OUTPUT_PATH=/app/cache/hls
       - LOGS_PATH=/app/logs
       - APP_HOST=0.0.0.0
       - APP_PORT=8080
       - CHUNK_SIZE=1048576
+      - MAX_CONCURRENT_HLS_JOBS=1
+      - HLS_SEGMENT_SECONDS=4
+      - HLS_FFMPEG_PRESET=veryfast
+      - HLS_CRF=23
     restart: unless-stopped
 
