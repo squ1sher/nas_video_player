@@ -10,12 +10,20 @@ def get_compatibility(extension: str, video_codec: str | None, audio_codec: str 
 
     Possible statuses:
       - direct_play   : browser can play without transcoding
-      - may_not_play  : might work in some browsers, but not guaranteed
+      - may_play      : likely to play in some browsers
+      - may_not_play  : likely not to play in most browsers
       - needs_conversion : will not play in any modern browser without transcoding
+      - unknown       : metadata missing, cannot estimate
     """
     ext = extension.lower().lstrip(".")
     vc = (video_codec or "").lower()
     ac = (audio_codec or "").lower()
+
+    if not vc and not ac:
+        return {
+            "status": "unknown",
+            "reason": "Not enough codec metadata to estimate browser playback support.",
+        }
 
     # --- needs_conversion (hard blockers) ---
     if ext == "avi":
@@ -67,6 +75,11 @@ def get_compatibility(extension: str, video_codec: str | None, audio_codec: str 
         return {
             "status": "may_not_play",
             "reason": f"WebM with {vc or 'unknown'} video / {ac or 'unknown'} audio may not play in all browsers.",
+        }
+    if ext in ("mpg", "mpeg"):
+        return {
+            "status": "may_play",
+            "reason": "MPEG container support varies by browser and codec.",
         }
 
     # --- unknown / catch-all ---

@@ -9,11 +9,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ProbeResult:
+    success: bool = False
+    has_video_stream: bool = False
     duration: float | None = None
     width: int | None = None
     height: int | None = None
     video_codec: str | None = None
     audio_codec: str | None = None
+    container_format: str | None = None
+    error: str | None = None
 
 
 def probe_video(path: Path) -> ProbeResult:
@@ -33,12 +37,12 @@ def probe_video(path: Path) -> ProbeResult:
         payload = json.loads(completed.stdout or "{}")
     except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
         logger.error("ffprobe failed for %s: %s", path, exc)
-        return ProbeResult()
+        return ProbeResult(success=False, error=str(exc))
 
     streams = payload.get("streams", [])
     format_info = payload.get("format", {})
 
-    video_stream = next((s for s in streams if s.get("codec_type") == "video"), {})
+    video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
     audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), {})
 
     duration: float | None = None
@@ -49,11 +53,18 @@ def probe_video(path: Path) -> ProbeResult:
         except (TypeError, ValueError):
             duration = None
 
+    format_name = format_info.get("format_name")
+    has_video_stream = video_stream is not None
+
     return ProbeResult(
+        success=True,
+        has_video_stream=has_video_stream,
         duration=duration,
-        width=video_stream.get("width"),
-        height=video_stream.get("height"),
-        video_codec=video_stream.get("codec_name"),
+        width=video_stream.get("width") if video_stream else None,
+        height=video_stream.get("height") if video_stream else None,
+        video_codec=video_stream.get("codec_name") if video_stream else None,
         audio_codec=audio_stream.get("codec_name"),
+        container_format=format_name,
+        error=None,
     )
 

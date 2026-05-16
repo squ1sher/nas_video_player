@@ -34,10 +34,23 @@ def test_finish_scan_sets_completed() -> None:
     _reset_state()
     from app.scan_status import finish_scan, get_scan_state, start_scan
     start_scan()
-    finish_scan(scanned=10, added=5, updated=3, errors=["oops"])
+    finish_scan(
+        scanned_files=10,
+        detected_videos=6,
+        probe_failed=2,
+        ignored_non_media=1,
+        ignored_excluded=1,
+        thumbnails_generated=5,
+        thumbnail_errors=1,
+        added=5,
+        updated=3,
+        errors=["oops"],
+    )
     state = get_scan_state()
     assert state.status == "completed"
     assert state.scanned == 10
+    assert state.scanned_files == 10
+    assert state.detected_videos == 6
     assert state.added == 5
     assert state.updated == 3
     assert state.errors == ["oops"]

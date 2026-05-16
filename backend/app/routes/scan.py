@@ -1,15 +1,10 @@
-import logging
-
 from fastapi import APIRouter, BackgroundTasks, Depends
-from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.database import get_db
 from app.scan_status import get_scan_state
-from app.scanner import scan_video_library, scan_video_library_background
-from app.schemas import ScanResponse, ScanStartedResponse, ScanStatusOut
+from app.scanner import scan_video_library_background
+from app.schemas import ScanStartedResponse, ScanStatusOut
 
-logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["scan"])
 
 
@@ -34,6 +29,13 @@ def get_scan_status() -> ScanStatusOut:
         status=state.status,
         started_at=state.started_at,
         finished_at=state.finished_at,
+        scanned_files=state.scanned_files,
+        detected_videos=state.detected_videos,
+        probe_failed=state.probe_failed,
+        ignored_non_media=state.ignored_non_media,
+        ignored_excluded=state.ignored_excluded,
+        thumbnails_generated=state.thumbnails_generated,
+        thumbnail_errors=state.thumbnail_errors,
         scanned=state.scanned,
         added=state.added,
         updated=state.updated,
@@ -50,6 +52,13 @@ def get_last_scan_result() -> ScanStatusOut:
         status=state.status,
         started_at=state.started_at,
         finished_at=state.finished_at,
+        scanned_files=state.scanned_files,
+        detected_videos=state.detected_videos,
+        probe_failed=state.probe_failed,
+        ignored_non_media=state.ignored_non_media,
+        ignored_excluded=state.ignored_excluded,
+        thumbnails_generated=state.thumbnails_generated,
+        thumbnail_errors=state.thumbnail_errors,
         scanned=state.scanned,
         added=state.added,
         updated=state.updated,

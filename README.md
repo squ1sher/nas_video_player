@@ -42,6 +42,13 @@ Mini-YouTube style local web video player for Synology NAS.
 - Animated indicator shows which file is being indexed
 - Completion banner shows counts (scanned / added / updated / errors)
 
+### Probe-based media discovery
+- Library scan now discovers media primarily via **ffprobe**, not only by extension allowlist
+- Unknown extensions (for example `.360`) can be indexed when probing is enabled
+- Uppercase extensions are normalized (for example `.MPG` -> `.mpg`)
+- Files with probe failures can still appear as `probe_failed_possible_video`
+- Non-browser-playable media is still shown in the library with compatibility badges
+
 ### Default sorting — Newest first
 - Library defaults to newest videos first (`created_at desc`)
 - Sort dropdown: Newest first, Oldest first, Title A-Z, Title Z-A, Duration, File size
@@ -152,6 +159,10 @@ nas_video_player/
 | `APP_HOST`           | `0.0.0.0`            | Bind address                    |
 | `APP_PORT`           | `8080`               | Bind port                       |
 | `CHUNK_SIZE`         | `1048576`            | Streaming chunk size (bytes)    |
+| `MEDIA_DISCOVERY_MODE` | `probe`           | `extension_allowlist` \/ `probe` \/ `hybrid` |
+| `EXCLUDED_EXTENSIONS` | `.txt,.nfo,...`    | Comma-separated excluded extensions |
+| `MIN_MEDIA_FILE_SIZE_BYTES` | `1048576`   | Skip very small unknown files before probing |
+| `PROBE_UNKNOWN_EXTENSIONS` | `true`      | Probe unknown extensions in `probe`/`hybrid` |
 
 ## Build and run
 
@@ -204,7 +215,7 @@ Open the app: `http://NAS_IP:8080`
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/scan` | Start background scan |
-| `GET` | `/api/scan/status` | Current scan status |
+| `GET` | `/api/scan/status` | Current scan status with discovery counters |
 | `GET` | `/api/scan/last-result` | Last scan result |
 
 ### Duplicates
@@ -270,6 +281,20 @@ Use this mode first when you want the safest candidate groups.
 - Duplicate detection is **candidate-based only** in this phase
 - It does **not** guarantee files are byte-identical
 - A future phase may add optional SHA256 hashing for exact confirmation
+
+## Media detection vs playback compatibility
+
+- `media_status` tells whether the scanner recognized a file as video media:
+  - `detected_video`
+  - `probe_failed_possible_video`
+- `compatibility_status` tells browser playback expectation separately:
+  - `direct_play`
+  - `may_play`
+  - `may_not_play`
+  - `needs_conversion`
+  - `unknown`
+
+This separation means the library can include files like `.mpg` / `.mpeg` / `.360` even when browser playback is uncertain.
 
 ## Running backend tests locally
 

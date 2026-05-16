@@ -28,12 +28,16 @@ export type SortOrder = "asc" | "desc";
 export async function fetchVideos(params: {
   q?: string;
   folder?: string;
+  compatibility_status?: string;
+  media_status?: string;
   sort?: SortField;
   order?: SortOrder;
 }): Promise<VideoListItem[]> {
   const query = new URLSearchParams();
   if (params.q) query.set("q", params.q);
   if (params.folder !== undefined) query.set("folder", params.folder);
+  if (params.compatibility_status) query.set("compatibility_status", params.compatibility_status);
+  if (params.media_status) query.set("media_status", params.media_status);
   if (params.sort) query.set("sort", params.sort);
   if (params.order) query.set("order", params.order);
 

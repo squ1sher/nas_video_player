@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,12 +17,32 @@ class Settings(BaseSettings):
     app_host: str = Field(default="0.0.0.0", validation_alias="APP_HOST")
     app_port: int = Field(default=8080, validation_alias="APP_PORT")
     chunk_size: int = Field(default=1_048_576, validation_alias="CHUNK_SIZE")
+    media_discovery_mode: Literal["extension_allowlist", "probe", "hybrid"] = Field(
+        default="probe",
+        validation_alias="MEDIA_DISCOVERY_MODE",
+    )
+    excluded_extensions: str = Field(
+        default=(
+            ".txt,.nfo,.srt,.ass,.ssa,.jpg,.jpeg,.png,.webp,.gif,.db,.sqlite,.json,.xml,.log,.tmp,.part,.crdownload,.ds_store"
+        ),
+        validation_alias="EXCLUDED_EXTENSIONS",
+    )
+    min_media_file_size_bytes: int = Field(default=1_048_576, validation_alias="MIN_MEDIA_FILE_SIZE_BYTES")
+    probe_unknown_extensions: bool = Field(default=True, validation_alias="PROBE_UNKNOWN_EXTENSIONS")
 
     def ensure_runtime_dirs(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.thumbnails_path.mkdir(parents=True, exist_ok=True)
         self.cache_path.mkdir(parents=True, exist_ok=True)
         self.logs_path.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def excluded_extensions_set(self) -> set[str]:
+        return {
+            ext.strip().lower() if ext.strip().startswith(".") else f".{ext.strip().lower()}"
+            for ext in self.excluded_extensions.split(",")
+            if ext.strip()
+        }
 
 
 @lru_cache

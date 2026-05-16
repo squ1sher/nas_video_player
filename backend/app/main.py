@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.database import Base, engine
 # Import all models so create_all picks them up
 import app.models  # noqa: F401
+from app.migrations import run_migrations
 from app.routes.duplicates import router as duplicates_router
 from app.routes.folders import router as folders_router
 from app.routes.health import router as health_router
@@ -39,6 +40,7 @@ app.include_router(videos_router)
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
+    run_migrations(engine)
     logger.info("Application started")
     logger.info("Video library path: %s", settings.video_library_path)
 

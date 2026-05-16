@@ -120,6 +120,7 @@ export function LibraryPage() {
   const [error, setError] = useState<string | null>(null);
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [playbackFilter, setPlaybackFilter] = useState<string>("all");
   const [sort, setSort] = useState<SortField>("created_at");
   const [order, setOrder] = useState<SortOrder>("desc");
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -169,7 +170,8 @@ export function LibraryPage() {
       setError(null);
       const q = search.trim() || undefined;
       const folder = selectedFolder !== null ? selectedFolder : undefined;
-      setVideos(await fetchVideos({ q, folder, sort, order }));
+      const compatibility_status = playbackFilter !== "all" ? playbackFilter : undefined;
+      setVideos(await fetchVideos({ q, folder, compatibility_status, sort, order }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load videos");
     } finally {
@@ -251,7 +253,7 @@ export function LibraryPage() {
 
   useEffect(() => {
     void loadVideos();
-  }, [search, sort, order, selectedFolder]);
+  }, [search, playbackFilter, sort, order, selectedFolder]);
 
   useEffect(() => {
     void loadContinueWatching();
@@ -449,6 +451,18 @@ export function LibraryPage() {
         {tab === "all" && (
           <div className="toolbar toolbar-inline">
             <SearchBar value={search} onChange={setSearch} />
+            <select
+              className="playback-filter-select"
+              value={playbackFilter}
+              onChange={(event) => setPlaybackFilter(event.target.value)}
+            >
+              <option value="all">All playback capabilities</option>
+              <option value="direct_play">Direct Play</option>
+              <option value="may_play">May Play</option>
+              <option value="may_not_play">May Not Play</option>
+              <option value="needs_conversion">Needs Conversion</option>
+              <option value="unknown">Unknown</option>
+            </select>
             <SortSelect sort={sort} order={order} onChange={handleSortChange} />
           </div>
         )}

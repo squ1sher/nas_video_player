@@ -122,6 +122,12 @@ export function WatchPage() {
 
       <VideoPlayer video={video} initialPosition={initialPosition} />
 
+      {video.media_status === "probe_failed_possible_video" && (
+        <div className="notice">
+          Could not read metadata. This may be an unsupported or damaged media file.
+        </div>
+      )}
+
       <div className="meta-grid">
         <div>
           <strong>Duration:</strong> {formatDuration(video.duration)}

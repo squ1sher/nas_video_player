@@ -43,6 +43,11 @@ def to_list_item(video: Video) -> VideoListItem:
         folder_path=video.folder_path,
         compatibility_status=video.compatibility_status,
         compatibility_reason=video.compatibility_reason,
+        media_status=video.media_status,
+        probe_status=video.probe_status,
+        probe_error=video.probe_error,
+        container_format=video.container_format,
+        thumbnail_status=video.thumbnail_status,
         created_at=video.created_at,
         indexed_at=video.indexed_at,
     )
@@ -59,6 +64,8 @@ def get_video_or_404(db: Session, video_id: int) -> Video:
 def list_videos(
     q: str | None = None,
     folder: str | None = None,
+    compatibility_status: str | None = None,
+    media_status: str | None = None,
     sort: str = "created_at",
     order: str = "desc",
     db: Session = Depends(get_db),
@@ -69,6 +76,10 @@ def list_videos(
     if folder is not None:
         # Exact match only — no path traversal possible
         query = query.filter(Video.folder_path == folder)
+    if compatibility_status:
+        query = query.filter(Video.compatibility_status == compatibility_status)
+    if media_status:
+        query = query.filter(Video.media_status == media_status)
     sort_field = SORT_FIELDS.get(sort, Video.created_at)
     sort_direction = desc if order.lower() == "desc" else asc
     videos = query.order_by(sort_direction(sort_field)).all()
@@ -95,6 +106,11 @@ def get_video(video_id: int, db: Session = Depends(get_db)) -> VideoDetail:
         folder_path=video.folder_path,
         compatibility_status=video.compatibility_status,
         compatibility_reason=video.compatibility_reason,
+        media_status=video.media_status,
+        probe_status=video.probe_status,
+        probe_error=video.probe_error,
+        container_format=video.container_format,
+        thumbnail_status=video.thumbnail_status,
         created_at=video.created_at,
         updated_at=video.updated_at,
         indexed_at=video.indexed_at,

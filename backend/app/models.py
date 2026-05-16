@@ -24,6 +24,11 @@ class Video(Base):
     video_codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
     audio_codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    thumbnail_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    media_status: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    probe_status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    probe_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    container_format: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Folder path relative to VIDEO_LIBRARY_PATH; empty string for root
     folder_path: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
     # Browser compatibility

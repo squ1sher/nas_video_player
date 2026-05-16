@@ -9,7 +9,13 @@ class HealthResponse(BaseModel):
 
 
 class ScanResponse(BaseModel):
-    scanned: int
+    scanned_files: int
+    detected_videos: int
+    probe_failed: int
+    ignored_non_media: int
+    ignored_excluded: int
+    thumbnails_generated: int
+    thumbnail_errors: int
     added: int
     updated: int
     errors: list[str]
@@ -24,6 +30,13 @@ class ScanStatusOut(BaseModel):
     status: str  # idle | running | completed | failed
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
+    scanned_files: int
+    detected_videos: int
+    probe_failed: int
+    ignored_non_media: int
+    ignored_excluded: int
+    thumbnails_generated: int
+    thumbnail_errors: int
     scanned: int
     added: int
     updated: int
@@ -46,6 +59,11 @@ class VideoListItem(BaseModel):
     folder_path: str | None
     compatibility_status: str | None
     compatibility_reason: str | None
+    media_status: str | None
+    probe_status: str | None
+    probe_error: str | None
+    container_format: str | None
+    thumbnail_status: str | None
     created_at: datetime
     indexed_at: datetime
 
@@ -66,6 +84,11 @@ class VideoDetail(BaseModel):
     folder_path: str | None
     compatibility_status: str | None
     compatibility_reason: str | None
+    media_status: str | None
+    probe_status: str | None
+    probe_error: str | None
+    container_format: str | None
+    thumbnail_status: str | None
     created_at: datetime
     updated_at: datetime
     indexed_at: datetime

@@ -20,8 +20,8 @@ export function ScanStatusBar({ status }: Props) {
   if (status.status === "completed") {
     return (
       <div className="scan-status scan-done">
-        ✓ Scan complete &mdash; {status.scanned} scanned, {status.added} added,{" "}
-        {status.updated} updated
+        ✓ Scan complete &mdash; {status.scanned_files} scanned, {status.detected_videos} detected videos,{" "}
+        {status.added} added, {status.updated} updated, {status.probe_failed} probe failed
         {status.errors.length > 0 && (
           <span className="scan-errors"> &bull; {status.errors.length} error(s)</span>
         )}

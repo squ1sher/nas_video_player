@@ -135,6 +135,14 @@ button {
   color: #f0f0f0;
 }
 
+.playback-filter-select {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #404040;
+  background: #1f1f1f;
+  color: #f0f0f0;
+}
+
 /* ── Messages ── */
 .notice {
   margin-bottom: 12px;
@@ -369,6 +377,29 @@ button {
   background: #3b0d0d;
   color: #f08080;
   border: 1px solid #6b1c1c;
+}
+
+.compat-unknown {
+  background: #2a2f36;
+  color: #cfd8e3;
+  border: 1px solid #4b5563;
+}
+
+.media-status-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: bold;
+  background: #1f2937;
+  border: 1px solid #374151;
+  color: #d1d5db;
+}
+
+.card-warning {
+  margin: 6px 0 0;
+  color: #f0c040;
+  font-size: 12px;
 }
 
 /* ── Folders panel ── */
