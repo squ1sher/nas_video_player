@@ -4,6 +4,10 @@ import type {
   DuplicateScanStatus,
   DuplicateSummary,
   FolderInfo,
+  LibrarySummary,
+  MediaProfileDetail,
+  MediaProfileItem,
+  ManualPlaybackStatus,
   ScanStartedResponse,
   ScanStatus,
   VideoDetail,
@@ -30,6 +34,14 @@ export async function fetchVideos(params: {
   folder?: string;
   compatibility_status?: string;
   media_status?: string;
+  probe_status?: string;
+  thumbnail_status?: string;
+  extension?: string;
+  has_probe_error?: boolean;
+  has_thumbnail?: boolean;
+  media_profile_id?: number;
+  compatibility_source?: string;
+  effective_compatibility_status?: string;
   sort?: SortField;
   order?: SortOrder;
 }): Promise<VideoListItem[]> {
@@ -38,6 +50,14 @@ export async function fetchVideos(params: {
   if (params.folder !== undefined) query.set("folder", params.folder);
   if (params.compatibility_status) query.set("compatibility_status", params.compatibility_status);
   if (params.media_status) query.set("media_status", params.media_status);
+  if (params.probe_status) query.set("probe_status", params.probe_status);
+  if (params.thumbnail_status) query.set("thumbnail_status", params.thumbnail_status);
+  if (params.extension) query.set("extension", params.extension);
+  if (params.has_probe_error !== undefined) query.set("has_probe_error", String(params.has_probe_error));
+  if (params.has_thumbnail !== undefined) query.set("has_thumbnail", String(params.has_thumbnail));
+  if (params.media_profile_id !== undefined) query.set("media_profile_id", String(params.media_profile_id));
+  if (params.compatibility_source) query.set("compatibility_source", params.compatibility_source);
+  if (params.effective_compatibility_status) query.set("effective_compatibility_status", params.effective_compatibility_status);
   if (params.sort) query.set("sort", params.sort);
   if (params.order) query.set("order", params.order);
 
@@ -95,6 +115,47 @@ export async function getFolders(): Promise<FolderInfo[]> {
   return handleResponse<FolderInfo[]>(await fetch(`${API_BASE}/folders`));
 }
 
+export async function getLibrarySummary(): Promise<LibrarySummary> {
+  return handleResponse<LibrarySummary>(
+    await fetch(`${API_BASE}/library/summary?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function getMediaProfiles(): Promise<MediaProfileItem[]> {
+  return handleResponse<MediaProfileItem[]>(await fetch(`${API_BASE}/media-profiles?t=${Date.now()}`, { cache: "no-store" }));
+}
+
+export async function getMediaProfile(profileId: number, limit = 20, offset = 0): Promise<MediaProfileDetail> {
+  return handleResponse<MediaProfileDetail>(
+    await fetch(`${API_BASE}/media-profiles/${profileId}?limit=${limit}&offset=${offset}&t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function setMediaProfilePlaybackStatus(
+  profileId: number,
+  manualPlaybackStatus: ManualPlaybackStatus,
+  manualPlaybackNote?: string,
+): Promise<MediaProfileItem> {
+  return handleResponse<MediaProfileItem>(
+    await fetch(`${API_BASE}/media-profiles/${profileId}/playback-status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        manual_playback_status: manualPlaybackStatus,
+        manual_playback_note: manualPlaybackNote,
+      }),
+    })
+  );
+}
+
+export async function clearMediaProfilePlaybackStatus(profileId: number): Promise<MediaProfileItem> {
+  return handleResponse<MediaProfileItem>(
+    await fetch(`${API_BASE}/media-profiles/${profileId}/playback-status`, {
+      method: "DELETE",
+    })
+  );
+}
+
 export async function startDuplicateScan(): Promise<{ status: string; mode: DuplicateMode }> {
   return handleResponse<{ status: string; mode: DuplicateMode }>(
     await fetch(`${API_BASE}/duplicates/scan`, { method: "POST" })
@@ -127,6 +188,22 @@ export async function deleteVideo(videoId: number): Promise<{ deleted: boolean }
   return handleResponse<{ deleted: boolean }>(
     await fetch(`${API_BASE}/videos/${videoId}`, {
       method: "DELETE",
+    })
+  );
+}
+
+export async function reprobeVideo(videoId: number): Promise<VideoDetail> {
+  return handleResponse<VideoDetail>(
+    await fetch(`${API_BASE}/videos/${videoId}/reprobe`, {
+      method: "POST",
+    })
+  );
+}
+
+export async function regenerateThumbnail(videoId: number): Promise<VideoDetail> {
+  return handleResponse<VideoDetail>(
+    await fetch(`${API_BASE}/videos/${videoId}/thumbnail/regenerate`, {
+      method: "POST",
     })
   );
 }

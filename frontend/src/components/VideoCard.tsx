@@ -31,12 +31,6 @@ function formatSize(bytes: number): string {
 export function VideoCard({ video, progress }: Props) {
   const resolution = video.width && video.height ? `${video.width}x${video.height}` : null;
   const progressPct = progress && progress.position_seconds > 0 ? Math.min(100, progress.percent_watched) : 0;
-  const mediaStatusLabel =
-    video.media_status === "probe_failed_possible_video"
-      ? "Probe failed"
-      : video.media_status === "detected_video"
-        ? "Detected video"
-        : video.media_status;
 
   return (
     <a
@@ -53,7 +47,6 @@ export function VideoCard({ video, progress }: Props) {
         )}
         <div className="thumb-overlay">
           <CompatibilityBadge status={video.compatibility_status} reason={video.compatibility_reason} showTooltip />
-          {mediaStatusLabel && <span className="media-status-badge">{mediaStatusLabel}</span>}
         </div>
         {progressPct > 0 && (
           <div className="progress-bar-wrap">
@@ -68,11 +61,6 @@ export function VideoCard({ video, progress }: Props) {
         <p className="card-meta">
           {video.extension.toUpperCase()} &mdash; {formatSize(video.size)}
         </p>
-        {video.media_status === "probe_failed_possible_video" && (
-          <p className="card-warning">
-            Could not read metadata. This may be an unsupported or damaged media file.
-          </p>
-        )}
         {progress && progress.position_seconds > 0 && !progress.completed && (
           <p className="card-resume">
             Resume from {formatDuration(progress.position_seconds)}

@@ -13,7 +13,7 @@ Mini-YouTube style local web video player for Synology NAS.
 - DSM 7.2.2+ (tested target: 7.2.2-72806 Update 5)
 - Synology Container Manager (Docker Compose)
 
-## Phase 1.5 Features (current)
+## Phase 1.8 Features (current)
 
 ### Watch progress / Resume playback
 - Global (single-user) watch progress saved in SQLite
@@ -33,7 +33,9 @@ Mini-YouTube style local web video player for Synology NAS.
 ### Folder navigation
 - Videos organized by relative folder path
 - Browse folders on the **Folders** tab
-- Click a folder to filter the video grid
+- Expand folders inline to see nested subfolders and direct video files
+- Folder rows show nested folder count and recursive video count
+- Videos in folder tree open watch page in a **new browser tab**
 - Folder paths are relative (NAS paths never exposed to frontend)
 
 ### Scan status
@@ -49,9 +51,18 @@ Mini-YouTube style local web video player for Synology NAS.
 - Files with probe failures can still appear as `probe_failed_possible_video`
 - Non-browser-playable media is still shown in the library with compatibility badges
 
-### Default sorting — Newest first
-- Library defaults to newest videos first (`created_at desc`)
-- Sort dropdown: Newest first, Oldest first, Title A-Z, Title Z-A, Duration, File size
+### Default sorting
+- Library defaults to `Date` descending (`file_modified_at desc`)
+- Sort controls in library UI: `Date`, `Duration`, `File size`
+- Separate order toggle switches between ascending and descending
+
+### Grouped All Videos UI
+- **All Videos** now renders grouped sections based on the selected sort mode.
+- Date sort: grouped by month and year (for example `May 2026`) using `file_modified_at` with fallbacks.
+- Duration sort: `Under 3 minutes`, `3-20 minutes`, `Over 20 minutes`, `Unknown duration`.
+- File size sort (GiB buckets): `Under 1 GB`, `1-20 GB`, `20-100 GB`, `Over 100 GB`, `Unknown size`.
+- Grouping is applied after search and filters.
+- Every group can be collapsed/expanded.
 
 ### Open video in new tab
 - All video cards open the watch page in a **new browser tab**
@@ -65,6 +76,34 @@ Mini-YouTube style local web video player for Synology NAS.
 - Does **not** read full files and does **not** calculate SHA256 in this phase
 - Shows duplicate groups, confidence, reason, thumbnails, relative paths, and potential space saving
 - Diagnostic only: duplicate scan does **not** delete, move, rename, or modify files
+
+### Diagnostics tab and library summary
+- New **Diagnostics** tab provides high-level library health cards:
+  - Total indexed, Direct Play, May Play, May Not Play, Needs Conversion, Unknown
+  - Probe Failed, Thumbnail Failed, Potential duplicate saving
+- New backend summary endpoint: `GET /api/library/summary`
+- Diagnostics sections list problematic files (probe failures, conversion-needed, unknown compatibility, thumbnail failures)
+- Unsupported or unknown files remain visible for inspection; they are not hidden
+
+### Single-file maintenance actions (safe)
+- `POST /api/videos/{id}/reprobe` re-runs metadata probe for one file and updates diagnostic fields
+- `POST /api/videos/{id}/thumbnail/regenerate` regenerates one thumbnail and records any ffmpeg error
+- These actions are non-destructive: they do not modify original media content
+
+### Media profile diagnostics and manual compatibility calibration
+- Automatic compatibility is treated as an **auto guess**, not final truth.
+- Scanner builds a stable media profile key using normalized metadata (extension, container, codecs, profile/level, pixel format, audio params, resolution bucket).
+- Diagnostics now includes **Unique Media Profiles**:
+  - one sample video per profile (open in new tab)
+  - files count per profile
+  - auto guess, manual profile status, effective status, source
+- Manual profile status can be set to:
+  - `playable`
+  - `not_playable`
+  - `partially_playable`
+  - `unknown`
+- Manual profile result overrides auto guess for all files linked to that media profile.
+- This creates a practical compatibility matrix for your actual browser/device setup (for example `.360` profiles can be marked playable if they really work).
 
 ## Required NAS folders
 
@@ -132,8 +171,15 @@ nas_video_player/
         SortSelect.tsx
         CompatibilityBadge.tsx
         ScanStatusBar.tsx
+        folders/
+          FolderTree.tsx
+          FolderNode.tsx
+          FolderVideoItem.tsx
       types/
         video.ts
+      utils/
+        groupVideos.ts
+        buildFolderTree.ts
       styles/
         global.css
     package.json
@@ -185,19 +231,35 @@ Open the app: `http://NAS_IP:8080`
 5. Use **Continue Watching** tab to resume in-progress videos
 6. Use **Duplicates** tab to review likely duplicate candidates
 7. Click **Scan Duplicates** to run a separate duplicate scan
-8. Click any video card → opens watch page in a **new tab**
-9. Video resumes from last position automatically
-10. Close the tab — progress is saved
+8. Use **Diagnostics** tab to inspect problematic files and quick-filter the library
+ 9. In **Folders**, expand folders inline to browse nested folders and play files without switching tabs
+10. Click any video card or folder video item -> opens watch page in a **new tab**
+11. Video resumes from last position automatically
+12. Close the tab - progress is saved
 
 ## API endpoints
 
 ### Videos
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/videos` | List videos (`q`, `folder`, `sort`, `order`) |
+| `GET` | `/api/videos` | List videos (`q`, `folder`, `sort`, `order`, diagnostics filters) |
 | `GET` | `/api/videos/{id}` | Video detail |
 | `GET` | `/api/videos/{id}/thumbnail` | Video thumbnail |
 | `GET` | `/api/videos/{id}/stream` | HTTP Range streaming |
+| `POST` | `/api/videos/{id}/reprobe` | Re-run ffprobe for one indexed file |
+| `POST` | `/api/videos/{id}/thumbnail/regenerate` | Re-generate thumbnail for one file |
+
+`GET /api/videos` additionally supports optional filters:
+- `compatibility_status`
+- `media_status`
+- `probe_status`
+- `thumbnail_status`
+- `extension`
+- `has_probe_error=true|false`
+- `has_thumbnail=true|false`
+- `media_profile_id`
+- `compatibility_source`
+- `effective_compatibility_status`
 
 ### Watch progress
 | Method | Path | Description |
@@ -217,6 +279,19 @@ Open the app: `http://NAS_IP:8080`
 | `POST` | `/api/scan` | Start background scan |
 | `GET` | `/api/scan/status` | Current scan status with discovery counters |
 | `GET` | `/api/scan/last-result` | Last scan result |
+
+### Library diagnostics
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/library/summary` | Aggregated library diagnostics + last scan snapshots |
+
+### Media profiles
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/media-profiles` | List unique media profiles with sample video and file counts |
+| `GET` | `/api/media-profiles/{id}` | Profile detail + paginated profile videos |
+| `PUT` | `/api/media-profiles/{id}/playback-status` | Set manual profile playback status |
+| `DELETE` | `/api/media-profiles/{id}/playback-status` | Clear manual profile playback status |
 
 ### Duplicates
 | Method | Path | Description |
@@ -282,19 +357,45 @@ Use this mode first when you want the safest candidate groups.
 - It does **not** guarantee files are byte-identical
 - A future phase may add optional SHA256 hashing for exact confirmation
 
-## Media detection vs playback compatibility
+## Status fields in diagnostics
 
-- `media_status` tells whether the scanner recognized a file as video media:
+- `media_status` tells scanner/media-detection outcome:
   - `detected_video`
   - `probe_failed_possible_video`
+- `probe_status` describes metadata probe execution:
+  - `success`
+  - `failed`
+  - `skipped`
 - `compatibility_status` tells browser playback expectation separately:
   - `direct_play`
   - `may_play`
   - `may_not_play`
   - `needs_conversion`
   - `unknown`
+- `thumbnail_status` describes thumbnail generation:
+  - `generated`
+  - `failed`
+  - `pending`
+  - `skipped`
+
+`compatibility_source` explains which status is currently effective:
+- `manual_profile_override`
+- `auto_heuristic`
+- `unknown`
 
 This separation means the library can include files like `.mpg` / `.mpeg` / `.360` even when browser playback is uncertain.
+
+## Why unsupported files are still shown
+
+- Visibility is intentional: unknown/unsupported files are retained so you can inspect probe errors and compatibility reasons.
+- Diagnostics helps decide what to re-probe, what needs conversion, and what can be ignored safely.
+- Phase 1.6 does not add transcoding, HLS, move/rename, or delete workflows for these diagnostics actions.
+
+Phase 1.7 keeps the same safety model:
+- no file deletion in diagnostics calibration workflow
+- no move/rename
+- no file content modification
+- no HLS/transcoding in this phase
 
 ## Running backend tests locally
 

@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -8,9 +9,17 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import Video, WatchProgress
+from app.media_probe import probe_video
+from app.models import MediaProfile, Video, WatchProgress
 from app.schemas import VideoDetail, VideoListItem
+from app.services.media_profile_service import (
+    assign_profile_to_video,
+    build_media_profile_fields,
+    compute_auto_compatibility,
+    upsert_media_profile,
+)
 from app.streaming import RangeError, iter_file_chunks, parse_range_header
+from app.thumbnails import generate_thumbnail
 from app.utils.files import guess_mime_type, safe_resolve_under_root
 
 logger = logging.getLogger(__name__)
@@ -28,6 +37,7 @@ SORT_FIELDS = {
 
 def to_list_item(video: Video) -> VideoListItem:
     thumb_url = f"/api/videos/{video.id}/thumbnail" if video.thumbnail_path else None
+    file_modified_at = datetime.fromtimestamp(video.modified_ts, tz=timezone.utc) if video.modified_ts else None
     return VideoListItem(
         id=video.id,
         title=video.title,
@@ -38,7 +48,12 @@ def to_list_item(video: Video) -> VideoListItem:
         width=video.width,
         height=video.height,
         video_codec=video.video_codec,
+        video_profile=video.video_profile,
+        video_level=video.video_level,
+        pixel_format=video.pixel_format,
         audio_codec=video.audio_codec,
+        audio_channels=video.audio_channels,
+        audio_sample_rate=video.audio_sample_rate,
         thumbnail_url=thumb_url,
         folder_path=video.folder_path,
         compatibility_status=video.compatibility_status,
@@ -48,7 +63,60 @@ def to_list_item(video: Video) -> VideoListItem:
         probe_error=video.probe_error,
         container_format=video.container_format,
         thumbnail_status=video.thumbnail_status,
+        thumbnail_error=video.thumbnail_error,
+        media_profile_id=video.media_profile_id,
+        media_profile_key=video.media_profile_key,
+        auto_compatibility_status=video.auto_compatibility_status,
+        auto_compatibility_reason=video.auto_compatibility_reason,
+        effective_compatibility_status=video.effective_compatibility_status,
+        compatibility_source=video.compatibility_source,
+        manual_playback_status=video.manual_playback_status,
+        file_modified_at=file_modified_at,
         created_at=video.created_at,
+        indexed_at=video.indexed_at,
+    )
+
+
+def to_detail(video: Video) -> VideoDetail:
+    thumb_url = f"/api/videos/{video.id}/thumbnail" if video.thumbnail_path else None
+    file_modified_at = datetime.fromtimestamp(video.modified_ts, tz=timezone.utc) if video.modified_ts else None
+    return VideoDetail(
+        id=video.id,
+        title=video.title,
+        filename=video.filename,
+        relative_path=video.relative_path,
+        extension=video.extension,
+        size=video.size,
+        duration=video.duration,
+        width=video.width,
+        height=video.height,
+        video_codec=video.video_codec,
+        video_profile=video.video_profile,
+        video_level=video.video_level,
+        pixel_format=video.pixel_format,
+        audio_codec=video.audio_codec,
+        audio_channels=video.audio_channels,
+        audio_sample_rate=video.audio_sample_rate,
+        thumbnail_url=thumb_url,
+        folder_path=video.folder_path,
+        compatibility_status=video.compatibility_status,
+        compatibility_reason=video.compatibility_reason,
+        media_status=video.media_status,
+        probe_status=video.probe_status,
+        probe_error=video.probe_error,
+        container_format=video.container_format,
+        thumbnail_status=video.thumbnail_status,
+        thumbnail_error=video.thumbnail_error,
+        media_profile_id=video.media_profile_id,
+        media_profile_key=video.media_profile_key,
+        auto_compatibility_status=video.auto_compatibility_status,
+        auto_compatibility_reason=video.auto_compatibility_reason,
+        effective_compatibility_status=video.effective_compatibility_status,
+        compatibility_source=video.compatibility_source,
+        manual_playback_status=video.manual_playback_status,
+        file_modified_at=file_modified_at,
+        created_at=video.created_at,
+        updated_at=video.updated_at,
         indexed_at=video.indexed_at,
     )
 
@@ -66,6 +134,14 @@ def list_videos(
     folder: str | None = None,
     compatibility_status: str | None = None,
     media_status: str | None = None,
+    probe_status: str | None = None,
+    thumbnail_status: str | None = None,
+    extension: str | None = None,
+    has_probe_error: bool | None = None,
+    has_thumbnail: bool | None = None,
+    media_profile_id: int | None = None,
+    compatibility_source: str | None = None,
+    effective_compatibility_status: str | None = None,
     sort: str = "created_at",
     order: str = "desc",
     db: Session = Depends(get_db),
@@ -80,6 +156,30 @@ def list_videos(
         query = query.filter(Video.compatibility_status == compatibility_status)
     if media_status:
         query = query.filter(Video.media_status == media_status)
+    if probe_status:
+        query = query.filter(Video.probe_status == probe_status)
+    if thumbnail_status:
+        query = query.filter(Video.thumbnail_status == thumbnail_status)
+    if extension:
+        ext = extension.strip().lower()
+        normalized_ext = ext if ext.startswith(".") else f".{ext}"
+        query = query.filter(Video.extension == normalized_ext)
+    if has_probe_error is not None:
+        if has_probe_error:
+            query = query.filter(Video.probe_error.isnot(None)).filter(Video.probe_error != "")
+        else:
+            query = query.filter((Video.probe_error.is_(None)) | (Video.probe_error == ""))
+    if has_thumbnail is not None:
+        if has_thumbnail:
+            query = query.filter(Video.thumbnail_path.isnot(None)).filter(Video.thumbnail_path != "")
+        else:
+            query = query.filter((Video.thumbnail_path.is_(None)) | (Video.thumbnail_path == ""))
+    if media_profile_id is not None:
+        query = query.filter(Video.media_profile_id == media_profile_id)
+    if compatibility_source:
+        query = query.filter(Video.compatibility_source == compatibility_source)
+    if effective_compatibility_status:
+        query = query.filter(Video.effective_compatibility_status == effective_compatibility_status)
     sort_field = SORT_FIELDS.get(sort, Video.created_at)
     sort_direction = desc if order.lower() == "desc" else asc
     videos = query.order_by(sort_direction(sort_field)).all()
@@ -89,32 +189,155 @@ def list_videos(
 @router.get("/{video_id}", response_model=VideoDetail)
 def get_video(video_id: int, db: Session = Depends(get_db)) -> VideoDetail:
     video = get_video_or_404(db, video_id)
-    thumb_url = f"/api/videos/{video.id}/thumbnail" if video.thumbnail_path else None
-    return VideoDetail(
-        id=video.id,
-        title=video.title,
-        filename=video.filename,
-        relative_path=video.relative_path,
-        extension=video.extension,
-        size=video.size,
-        duration=video.duration,
-        width=video.width,
-        height=video.height,
-        video_codec=video.video_codec,
-        audio_codec=video.audio_codec,
-        thumbnail_url=thumb_url,
-        folder_path=video.folder_path,
-        compatibility_status=video.compatibility_status,
-        compatibility_reason=video.compatibility_reason,
-        media_status=video.media_status,
-        probe_status=video.probe_status,
-        probe_error=video.probe_error,
-        container_format=video.container_format,
-        thumbnail_status=video.thumbnail_status,
-        created_at=video.created_at,
-        updated_at=video.updated_at,
-        indexed_at=video.indexed_at,
-    )
+    return to_detail(video)
+
+
+@router.post("/{video_id}/reprobe", response_model=VideoDetail)
+def reprobe_video(
+    video_id: int,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> VideoDetail:
+    video = get_video_or_404(db, video_id)
+    try:
+        video_path = safe_resolve_under_root(settings.video_library_path, video.relative_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Video file not found") from exc
+
+    if not video_path.exists() or not video_path.is_file():
+        raise HTTPException(status_code=404, detail="Video file not found")
+
+    probe = probe_video(video_path)
+    profile: MediaProfile | None = None
+    if not probe.success:
+        video.duration = None
+        video.width = None
+        video.height = None
+        video.video_codec = None
+        video.video_profile = None
+        video.video_level = None
+        video.pixel_format = None
+        video.audio_codec = None
+        video.audio_channels = None
+        video.audio_sample_rate = None
+        video.container_format = None
+        video.media_status = "probe_failed_possible_video"
+        video.probe_status = "failed"
+        video.probe_error = probe.error
+        auto_status, auto_reason = compute_auto_compatibility(video.extension, None, None)
+        profile_fields = build_media_profile_fields(
+            extension=video.extension,
+            container_format=None,
+            video_codec=None,
+            video_profile=None,
+            video_level=None,
+            pixel_format=None,
+            audio_codec=None,
+            audio_channels=None,
+            audio_sample_rate=None,
+            width=None,
+            height=None,
+        )
+        profile = upsert_media_profile(db, profile_fields, auto_status=auto_status, auto_reason=auto_reason)
+        assign_profile_to_video(video, profile)
+    elif not probe.has_video_stream:
+        video.duration = probe.duration
+        video.width = None
+        video.height = None
+        video.video_codec = None
+        video.video_profile = None
+        video.video_level = None
+        video.pixel_format = None
+        video.audio_codec = probe.audio_codec
+        video.audio_channels = probe.audio_channels
+        video.audio_sample_rate = probe.audio_sample_rate
+        video.container_format = probe.container_format
+        video.media_status = "ignored_non_media"
+        video.probe_status = "success"
+        video.probe_error = "No video stream detected"
+        auto_status, auto_reason = compute_auto_compatibility(video.extension, None, probe.audio_codec)
+        profile_fields = build_media_profile_fields(
+            extension=video.extension,
+            container_format=probe.container_format,
+            video_codec=None,
+            video_profile=None,
+            video_level=None,
+            pixel_format=None,
+            audio_codec=probe.audio_codec,
+            audio_channels=probe.audio_channels,
+            audio_sample_rate=probe.audio_sample_rate,
+            width=None,
+            height=None,
+        )
+        profile = upsert_media_profile(db, profile_fields, auto_status=auto_status, auto_reason=auto_reason)
+        assign_profile_to_video(video, profile)
+    else:
+        video.duration = probe.duration
+        video.width = probe.width
+        video.height = probe.height
+        video.video_codec = probe.video_codec
+        video.video_profile = probe.video_profile
+        video.video_level = probe.video_level
+        video.pixel_format = probe.pixel_format
+        video.audio_codec = probe.audio_codec
+        video.audio_channels = probe.audio_channels
+        video.audio_sample_rate = probe.audio_sample_rate
+        video.container_format = probe.container_format
+        video.media_status = "detected_video"
+        video.probe_status = "success"
+        video.probe_error = None
+        auto_status, auto_reason = compute_auto_compatibility(video.extension, probe.video_codec, probe.audio_codec)
+        profile_fields = build_media_profile_fields(
+            extension=video.extension,
+            container_format=probe.container_format,
+            video_codec=probe.video_codec,
+            video_profile=probe.video_profile,
+            video_level=probe.video_level,
+            pixel_format=probe.pixel_format,
+            audio_codec=probe.audio_codec,
+            audio_channels=probe.audio_channels,
+            audio_sample_rate=probe.audio_sample_rate,
+            width=probe.width,
+            height=probe.height,
+        )
+        profile = upsert_media_profile(db, profile_fields, auto_status=auto_status, auto_reason=auto_reason)
+        assign_profile_to_video(video, profile)
+
+    if profile is not None and profile.sample_video_id is None:
+        profile.sample_video_id = video.id
+
+    db.commit()
+    db.refresh(video)
+    return to_detail(video)
+
+
+@router.post("/{video_id}/thumbnail/regenerate", response_model=VideoDetail)
+def regenerate_video_thumbnail(
+    video_id: int,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> VideoDetail:
+    video = get_video_or_404(db, video_id)
+    try:
+        video_path = safe_resolve_under_root(settings.video_library_path, video.relative_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Video file not found") from exc
+
+    if not video_path.exists() or not video_path.is_file():
+        raise HTTPException(status_code=404, detail="Video file not found")
+
+    result = generate_thumbnail(video_path, settings.thumbnails_path, video.relative_path, force=True)
+    if result.path is not None:
+        video.thumbnail_path = result.path.name
+        video.thumbnail_status = "generated"
+        video.thumbnail_error = None
+    else:
+        video.thumbnail_status = "failed"
+        video.thumbnail_error = result.error or "Thumbnail generation failed"
+
+    db.commit()
+    db.refresh(video)
+    return to_detail(video)
 
 
 @router.get("/{video_id}/thumbnail")

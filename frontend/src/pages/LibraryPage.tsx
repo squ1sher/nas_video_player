@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  clearMediaProfilePlaybackStatus,
   deleteVideo,
   fetchVideos,
   getContinueWatching,
   getDuplicateGroups,
+  getMediaProfiles,
+  getLibrarySummary,
   getDuplicateStatus,
   getDuplicateSummary,
-  getFolders,
   getScanStatus,
   runScan,
+  setMediaProfilePlaybackStatus,
   startDuplicateScan,
 } from "../api/client";
 import type { SortField, SortOrder } from "../api/client";
@@ -16,61 +19,23 @@ import { ScanStatusBar } from "../components/ScanStatusBar";
 import { SearchBar } from "../components/SearchBar";
 import { SortSelect } from "../components/SortSelect";
 import { VideoCard } from "../components/VideoCard";
+import { FolderTree } from "../components/folders/FolderTree";
 import type {
   DuplicateGroup,
   DuplicateScanStatus,
   DuplicateSummary,
-  FolderInfo,
+  LibrarySummary,
+  ManualPlaybackStatus,
+  MediaProfileItem,
   ScanStatus,
   VideoListItem,
   VideoWithProgress,
 } from "../types/video";
+import { buildFolderTree } from "../utils/buildFolderTree";
+import { groupVideos } from "../utils/groupVideos";
 
-type Tab = "all" | "folders" | "continue" | "duplicates";
-
-type FolderNode = {
-  name: string;
-  path: string;
-  videoCount: number;
-  children: FolderNode[];
-};
-
-function buildFolderTree(items: FolderInfo[]): FolderNode[] {
-  const root: FolderNode = { name: "", path: "", videoCount: 0, children: [] };
-
-  const ensureChild = (parent: FolderNode, name: string, path: string): FolderNode => {
-    const existing = parent.children.find((child) => child.name === name);
-    if (existing) return existing;
-    const created: FolderNode = { name, path, videoCount: 0, children: [] };
-    parent.children.push(created);
-    return created;
-  };
-
-  for (const folder of items) {
-    const normalized = folder.folder_path.trim();
-    if (!normalized) {
-      root.videoCount += folder.video_count;
-      continue;
-    }
-
-    const parts = normalized.split("/").filter(Boolean);
-    let current = root;
-    let path = "";
-    for (const part of parts) {
-      path = path ? `${path}/${part}` : part;
-      current = ensureChild(current, part, path);
-    }
-    current.videoCount += folder.video_count;
-  }
-
-  const sortTree = (nodes: FolderNode[]) => {
-    nodes.sort((a, b) => a.name.localeCompare(b.name));
-    nodes.forEach((node) => sortTree(node.children));
-  };
-
-  sortTree(root.children);
-  return root.children;
-}
+type Tab = "all" | "folders" | "continue" | "recent" | "duplicates" | "diagnostics";
+type ProfileSort = "default" | "files_count_desc" | "extension" | "effective_status";
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return "Unknown";
@@ -104,11 +69,12 @@ export function LibraryPage() {
   const [tab, setTab] = useState<Tab>("all");
   const [videos, setVideos] = useState<VideoListItem[]>([]);
   const [continueWatching, setContinueWatching] = useState<VideoWithProgress[]>([]);
-  const [folders, setFolders] = useState<FolderInfo[]>([]);
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [folderVideos, setFolderVideos] = useState<VideoListItem[]>([]);
+  const [folderLoading, setFolderLoading] = useState(true);
   const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null);
   const [duplicateStatus, setDuplicateStatus] = useState<DuplicateScanStatus | null>(null);
   const [duplicateSummary, setDuplicateSummary] = useState<DuplicateSummary | null>(null);
+  const [librarySummary, setLibrarySummary] = useState<LibrarySummary | null>(null);
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
   const duplicateMode = "strict";
   const [deletingVideoId, setDeletingVideoId] = useState<number | null>(null);
@@ -121,13 +87,31 @@ export function LibraryPage() {
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [playbackFilter, setPlaybackFilter] = useState<string>("all");
-  const [sort, setSort] = useState<SortField>("created_at");
+  const [mediaStatusFilter, setMediaStatusFilter] = useState<string | undefined>(undefined);
+  const [probeStatusFilter, setProbeStatusFilter] = useState<string | undefined>(undefined);
+  const [thumbnailStatusFilter, setThumbnailStatusFilter] = useState<string | undefined>(undefined);
+  const [extensionFilter, setExtensionFilter] = useState<string | undefined>(undefined);
+  const [hasProbeErrorFilter, setHasProbeErrorFilter] = useState<boolean | undefined>(undefined);
+  const [hasThumbnailFilter, setHasThumbnailFilter] = useState<boolean | undefined>(undefined);
+  const [sort, setSort] = useState<SortField>("file_modified_at");
   const [order, setOrder] = useState<SortOrder>("desc");
+  const [probeFailedFiles, setProbeFailedFiles] = useState<VideoListItem[]>([]);
+  const [needsConversionFiles, setNeedsConversionFiles] = useState<VideoListItem[]>([]);
+  const [unknownCompatibilityFiles, setUnknownCompatibilityFiles] = useState<VideoListItem[]>([]);
+  const [thumbnailFailedFiles, setThumbnailFailedFiles] = useState<VideoListItem[]>([]);
+  const [mediaProfiles, setMediaProfiles] = useState<MediaProfileItem[]>([]);
+  const [profileEffectiveFilter, setProfileEffectiveFilter] = useState<string>("all");
+  const [profileOnlyMissingManual, setProfileOnlyMissingManual] = useState(true);
+  const [profileExtensionFilter, setProfileExtensionFilter] = useState<string>("");
+  const [profileSort, setProfileSort] = useState<ProfileSort>("default");
+  const [profileActionBusyId, setProfileActionBusyId] = useState<number | null>(null);
+  const [collapsedVideoGroups, setCollapsedVideoGroups] = useState<Set<string>>(new Set());
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const libraryPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const duplicatePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+  const folderTree = useMemo(() => buildFolderTree(folderVideos), [folderVideos]);
+  const groupedVideos = useMemo(() => groupVideos(videos, { sort, order }), [videos, sort, order]);
   const progressMap = Object.fromEntries(continueWatching.map((video) => [video.id, video.progress]));
   const duplicateVideoMap = useMemo(() => {
     const map = new Map<number, DuplicateGroup["videos"][number]>();
@@ -149,6 +133,63 @@ export function LibraryPage() {
     () => selectedDuplicateVideos.reduce((acc, video) => acc + video.size, 0),
     [selectedDuplicateVideos]
   );
+  const filteredMediaProfiles = useMemo(() => {
+    let rows = [...mediaProfiles];
+    if (profileEffectiveFilter !== "all") {
+      rows = rows.filter((profile) => profile.effective_compatibility_status === profileEffectiveFilter);
+    }
+    if (profileOnlyMissingManual) {
+      rows = rows.filter((profile) => profile.manual_playback_status === null);
+    }
+    if (profileExtensionFilter.trim()) {
+      const ext = profileExtensionFilter.trim().toLowerCase();
+      const normalized = ext.startsWith(".") ? ext : `.${ext}`;
+      rows = rows.filter((profile) => profile.extension === normalized);
+    }
+
+    if (profileSort === "files_count_desc") {
+      rows.sort((a, b) => b.files_count - a.files_count);
+    } else if (profileSort === "extension") {
+      rows.sort((a, b) => a.extension.localeCompare(b.extension));
+    } else if (profileSort === "effective_status") {
+      rows.sort((a, b) => a.effective_compatibility_status.localeCompare(b.effective_compatibility_status));
+    } else {
+      rows.sort((a, b) => {
+        const aMissing = a.manual_playback_status === null ? 0 : 1;
+        const bMissing = b.manual_playback_status === null ? 0 : 1;
+        if (aMissing !== bMissing) return aMissing - bMissing;
+        return b.files_count - a.files_count;
+      });
+    }
+    return rows;
+  }, [mediaProfiles, profileEffectiveFilter, profileOnlyMissingManual, profileExtensionFilter, profileSort]);
+
+  const applyOptimisticProfileStatus = (profileId: number, manualStatus: ManualPlaybackStatus | null) => {
+    setMediaProfiles((prev) =>
+      prev.map((profile) => {
+        if (profile.id !== profileId) return profile;
+
+        const effectiveStatus = manualStatus
+          ? manualStatus === "playable"
+            ? "direct_play"
+            : manualStatus === "not_playable"
+              ? "needs_conversion"
+              : manualStatus === "partially_playable"
+                ? "may_play"
+                : "unknown"
+          : profile.auto_compatibility_status;
+
+        return {
+          ...profile,
+          manual_playback_status: manualStatus,
+          manual_playback_note: manualStatus ? profile.manual_playback_note : null,
+          manual_checked_at: manualStatus ? new Date().toISOString() : null,
+          effective_compatibility_status: effectiveStatus,
+          compatibility_source: manualStatus ? "manual_profile_override" : "auto_heuristic",
+        };
+      })
+    );
+  };
 
   const stopLibraryPolling = () => {
     if (libraryPollRef.current) {
@@ -169,13 +210,58 @@ export function LibraryPage() {
       setLoading(true);
       setError(null);
       const q = search.trim() || undefined;
-      const folder = selectedFolder !== null ? selectedFolder : undefined;
       const compatibility_status = playbackFilter !== "all" ? playbackFilter : undefined;
-      setVideos(await fetchVideos({ q, folder, compatibility_status, sort, order }));
+      setVideos(
+        await fetchVideos({
+          q,
+          compatibility_status,
+          media_status: mediaStatusFilter,
+          probe_status: probeStatusFilter,
+          thumbnail_status: thumbnailStatusFilter,
+          extension: extensionFilter,
+          has_probe_error: hasProbeErrorFilter,
+          has_thumbnail: hasThumbnailFilter,
+          sort,
+          order,
+        })
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load videos");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadLibrarySummary = async () => {
+    try {
+      setLibrarySummary(await getLibrarySummary());
+    } catch {
+      // non-critical
+    }
+  };
+
+  const loadDiagnosticsSections = async () => {
+    try {
+      const [probeFailed, needsConversion, unknownCompatibility, thumbnailFailed] = await Promise.all([
+        fetchVideos({ probe_status: "failed", sort: "indexed_at", order: "desc" }),
+        fetchVideos({ compatibility_status: "needs_conversion", sort: "indexed_at", order: "desc" }),
+        fetchVideos({ compatibility_status: "unknown", sort: "indexed_at", order: "desc" }),
+        fetchVideos({ thumbnail_status: "failed", sort: "indexed_at", order: "desc" }),
+      ]);
+      setProbeFailedFiles(probeFailed.slice(0, 20));
+      setNeedsConversionFiles(needsConversion.slice(0, 20));
+      setUnknownCompatibilityFiles(unknownCompatibility.slice(0, 20));
+      setThumbnailFailedFiles(thumbnailFailed.slice(0, 20));
+    } catch {
+      // non-critical
+    }
+  };
+
+  const loadMediaProfilesData = async () => {
+    try {
+      setMediaProfiles(await getMediaProfiles());
+    } catch {
+      // non-critical
     }
   };
 
@@ -187,11 +273,19 @@ export function LibraryPage() {
     }
   };
 
-  const loadFolders = async () => {
+  const loadFolderVideos = async () => {
     try {
-      setFolders(await getFolders());
+      setFolderLoading(true);
+      setFolderVideos(
+        await fetchVideos({
+          sort,
+          order,
+        })
+      );
     } catch {
       // non-critical
+    } finally {
+      setFolderLoading(false);
     }
   };
 
@@ -226,7 +320,14 @@ export function LibraryPage() {
         if (status.status !== "running") {
           stopLibraryPolling();
           if (status.status === "completed") {
-            await Promise.all([loadVideos(), loadContinueWatching(), loadFolders()]);
+              await Promise.all([
+                loadVideos(),
+                loadContinueWatching(),
+                loadFolderVideos(),
+                loadLibrarySummary(),
+                loadDiagnosticsSections(),
+                loadMediaProfilesData(),
+              ]);
           }
         }
       } catch {
@@ -253,11 +354,25 @@ export function LibraryPage() {
 
   useEffect(() => {
     void loadVideos();
-  }, [search, playbackFilter, sort, order, selectedFolder]);
+  }, [
+    search,
+    playbackFilter,
+    mediaStatusFilter,
+    probeStatusFilter,
+    thumbnailStatusFilter,
+    extensionFilter,
+    hasProbeErrorFilter,
+    hasThumbnailFilter,
+    sort,
+    order,
+  ]);
 
   useEffect(() => {
     void loadContinueWatching();
-    void loadFolders();
+    void loadFolderVideos();
+    void loadLibrarySummary();
+    void loadDiagnosticsSections();
+    void loadMediaProfilesData();
     getScanStatus()
       .then((status) => {
         setScanStatus(status);
@@ -268,9 +383,49 @@ export function LibraryPage() {
   }, []);
 
   useEffect(() => {
+    void loadFolderVideos();
+  }, [sort, order]);
+
+  useEffect(() => {
     void loadDuplicateData();
     return () => stopDuplicatePolling();
   }, []);
+
+  useEffect(() => {
+    if (tab === "diagnostics") {
+      void Promise.all([loadLibrarySummary(), loadDiagnosticsSections(), loadMediaProfilesData()]);
+    }
+  }, [tab]);
+
+  const onSetProfileStatus = async (profileId: number, status: ManualPlaybackStatus) => {
+    try {
+      setProfileActionBusyId(profileId);
+      setError(null);
+      applyOptimisticProfileStatus(profileId, status);
+      await setMediaProfilePlaybackStatus(profileId, status);
+      await Promise.all([loadMediaProfilesData(), loadLibrarySummary(), loadDiagnosticsSections(), loadVideos()]);
+    } catch (err) {
+      await loadMediaProfilesData();
+      setError(err instanceof Error ? err.message : "Failed to update profile status");
+    } finally {
+      setProfileActionBusyId(null);
+    }
+  };
+
+  const onClearProfileStatus = async (profileId: number) => {
+    try {
+      setProfileActionBusyId(profileId);
+      setError(null);
+      applyOptimisticProfileStatus(profileId, null);
+      await clearMediaProfilePlaybackStatus(profileId);
+      await Promise.all([loadMediaProfilesData(), loadLibrarySummary(), loadDiagnosticsSections(), loadVideos()]);
+    } catch (err) {
+      await loadMediaProfilesData();
+      setError(err instanceof Error ? err.message : "Failed to clear profile status");
+    } finally {
+      setProfileActionBusyId(null);
+    }
+  };
 
   useEffect(() => {
     // Keep selected IDs in sync with currently visible duplicate results.
@@ -288,13 +443,53 @@ export function LibraryPage() {
     setOrder(newOrder);
   };
 
-  const handleFolderSelect = (path: string) => {
-    setSelectedFolder(path);
+  const handleShowAll = () => {
+    setPlaybackFilter("all");
+    setMediaStatusFilter(undefined);
+    setProbeStatusFilter(undefined);
+    setThumbnailStatusFilter(undefined);
+    setExtensionFilter(undefined);
+    setHasProbeErrorFilter(undefined);
+    setHasThumbnailFilter(undefined);
     setTab("all");
   };
 
-  const handleShowAll = () => {
-    setSelectedFolder(null);
+  const toggleVideoGroup = (groupKey: string) => {
+    setCollapsedVideoGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  };
+
+  const applyCompatibilityFilter = (status: string) => {
+    setPlaybackFilter(status);
+    setMediaStatusFilter(undefined);
+    setProbeStatusFilter(undefined);
+    setThumbnailStatusFilter(undefined);
+    setExtensionFilter(undefined);
+    setHasProbeErrorFilter(undefined);
+    setHasThumbnailFilter(undefined);
+    setTab("all");
+  };
+
+  const applyDiagnosticFilter = (filters: {
+    compatibility_status?: string;
+    media_status?: string;
+    probe_status?: string;
+    thumbnail_status?: string;
+    extension?: string;
+    has_probe_error?: boolean;
+    has_thumbnail?: boolean;
+  }) => {
+    setPlaybackFilter(filters.compatibility_status ?? "all");
+    setMediaStatusFilter(filters.media_status);
+    setProbeStatusFilter(filters.probe_status);
+    setThumbnailStatusFilter(filters.thumbnail_status);
+    setExtensionFilter(filters.extension);
+    setHasProbeErrorFilter(filters.has_probe_error);
+    setHasThumbnailFilter(filters.has_thumbnail);
     setTab("all");
   };
 
@@ -339,7 +534,7 @@ export function LibraryPage() {
       setDuplicateError(null);
       setDeletingVideoId(videoId);
       await deleteVideo(videoId);
-      await Promise.all([loadDuplicateData(), loadVideos(), loadContinueWatching(), loadFolders()]);
+      await Promise.all([loadDuplicateData(), loadVideos(), loadContinueWatching(), loadFolderVideos()]);
     } catch (err) {
       setDuplicateError(err instanceof Error ? err.message : "Failed to delete video");
     } finally {
@@ -370,7 +565,7 @@ export function LibraryPage() {
         }
         setBulkDeleteProgress({ done: index + 1, total: selectedDuplicateVideos.length });
       }
-      await Promise.all([loadDuplicateData(), loadVideos(), loadContinueWatching(), loadFolders()]);
+      await Promise.all([loadDuplicateData(), loadVideos(), loadContinueWatching(), loadFolderVideos()]);
       setSelectedDuplicateIds(new Set());
       setShowDeleteConfirm(false);
       if (failures.length > 0) {
@@ -380,32 +575,6 @@ export function LibraryPage() {
       setDeletingVideoId(null);
       setBulkDeleteProgress(null);
     }
-  };
-
-  const renderFolderNode = (node: FolderNode) => {
-    const hasChildren = node.children.length > 0;
-    const isExpanded = expandedFolders.has(node.path);
-    return (
-      <li key={node.path} className="folder-tree-node">
-        <div className="folder-tree-row">
-          {hasChildren ? (
-            <button className="folder-toggle" onClick={() => toggleFolder(node.path)}>
-              {isExpanded ? "▾" : "▸"}
-            </button>
-          ) : (
-            <span className="folder-toggle-placeholder" />
-          )}
-          <button className="folder-tree-item" onClick={() => handleFolderSelect(node.path)}>
-            <span className="folder-icon">📁</span>
-            <span className="folder-name">{node.name}</span>
-            <span className="folder-count">{node.videoCount} videos</span>
-          </button>
-        </div>
-        {hasChildren && isExpanded && (
-          <ul className="folder-tree-children">{node.children.map((child) => renderFolderNode(child))}</ul>
-        )}
-      </li>
-    );
   };
 
   return (
@@ -440,30 +609,32 @@ export function LibraryPage() {
             Continue Watching
             {continueWatching.length > 0 && <span className="tab-badge">{continueWatching.length}</span>}
           </button>
+          <button className={tab === "recent" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("recent")}>
+            Recently Added
+          </button>
           <button className={tab === "duplicates" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("duplicates")}>
             Duplicates
             {duplicateSummary && duplicateSummary.candidate_groups_found > 0 && (
               <span className="tab-badge">{duplicateSummary.candidate_groups_found}</span>
             )}
           </button>
+          <button className={tab === "diagnostics" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("diagnostics")}>
+            Diagnostics
+          </button>
         </nav>
 
         {tab === "all" && (
           <div className="toolbar toolbar-inline">
             <SearchBar value={search} onChange={setSearch} />
-            <select
-              className="playback-filter-select"
-              value={playbackFilter}
-              onChange={(event) => setPlaybackFilter(event.target.value)}
-            >
-              <option value="all">All playback capabilities</option>
-              <option value="direct_play">Direct Play</option>
-              <option value="may_play">May Play</option>
-              <option value="may_not_play">May Not Play</option>
-              <option value="needs_conversion">Needs Conversion</option>
-              <option value="unknown">Unknown</option>
-            </select>
             <SortSelect sort={sort} order={order} onChange={handleSortChange} />
+            <div className="compat-chip-row">
+              <button className={playbackFilter === "all" ? "filter-chip active" : "filter-chip"} onClick={() => applyCompatibilityFilter("all")}>All</button>
+              <button className={playbackFilter === "direct_play" ? "filter-chip active" : "filter-chip"} onClick={() => applyCompatibilityFilter("direct_play")}>Direct Play</button>
+              <button className={playbackFilter === "may_play" ? "filter-chip active" : "filter-chip"} onClick={() => applyCompatibilityFilter("may_play")}>May Play</button>
+              <button className={playbackFilter === "may_not_play" ? "filter-chip active" : "filter-chip"} onClick={() => applyCompatibilityFilter("may_not_play")}>May Not Play</button>
+              <button className={playbackFilter === "needs_conversion" ? "filter-chip active" : "filter-chip"} onClick={() => applyCompatibilityFilter("needs_conversion")}>Needs Conversion</button>
+              <button className={playbackFilter === "unknown" ? "filter-chip active" : "filter-chip"} onClick={() => applyCompatibilityFilter("unknown")}>Unknown</button>
+            </div>
           </div>
         )}
 
@@ -522,44 +693,56 @@ export function LibraryPage() {
 
         {tab === "folders" && <div className="tabs-spacer" />}
         {tab === "continue" && <div className="tabs-spacer" />}
+        {tab === "recent" && <div className="tabs-spacer" />}
+        {tab === "diagnostics" && <div className="tabs-spacer" />}
       </div>
 
       {tab === "all" && (
         <>
-          {selectedFolder !== null && (
-            <div className="folder-breadcrumb">
-              <button className="link-btn" onClick={handleShowAll}>All Videos</button>
-              {" / "}
-              <strong>{selectedFolder || "Root"}</strong>
-            </div>
-          )}
           {loading ? (
             <div className="status">Loading videos…</div>
           ) : videos.length === 0 ? (
             <div className="status">No videos found. Click Scan Library to index your files.</div>
           ) : (
-            <section className="video-grid">
-              {videos.map((video) => (
-                <VideoCard key={video.id} video={video} progress={progressMap[video.id]} />
+            <div className="video-group-list">
+              {groupedVideos.map((group) => (
+                <section key={group.key} className="video-group-section">
+                  <button className="video-group-header video-group-toggle" onClick={() => toggleVideoGroup(group.key)}>
+                    <span>{collapsedVideoGroups.has(group.key) ? ">" : "v"}</span>
+                    <span>{group.title} - {group.videos.length} videos</span>
+                  </button>
+                  {!collapsedVideoGroups.has(group.key) && (
+                    <div className="video-grid video-grid-grouped">
+                      {group.videos.map((video) => (
+                        <VideoCard key={video.id} video={video} progress={progressMap[video.id]} />
+                      ))}
+                    </div>
+                  )}
+                </section>
               ))}
-            </section>
+            </div>
           )}
         </>
       )}
 
       {tab === "folders" && (
         <div className="folders-panel">
-          {folders.length === 0 ? (
+          <div className="toolbar toolbar-inline folder-sort-toolbar">
+            <SortSelect sort={sort} order={order} onChange={handleSortChange} />
+          </div>
+          {folderLoading ? (
+            <div className="status">Loading folders...</div>
+          ) : folderTree.children.length === 0 && folderTree.videos.length === 0 ? (
             <div className="status">No folders found. Scan your library first.</div>
           ) : (
-            <>
-              <button className="folder-item folder-root-item" onClick={() => handleFolderSelect("")}>
-                <span className="folder-icon">📁</span>
-                <span className="folder-name">Root</span>
-                <span className="folder-count">{folders.find((item) => item.folder_path === "")?.video_count ?? 0} videos</span>
-              </button>
-              <ul className="folder-tree-list">{folderTree.map((node) => renderFolderNode(node))}</ul>
-            </>
+            <FolderTree
+              root={folderTree}
+              expandedPaths={expandedFolders}
+              onToggle={toggleFolder}
+              progressByVideoId={progressMap}
+              sort={sort}
+              order={order}
+            />
           )}
         </div>
       )}
@@ -576,6 +759,259 @@ export function LibraryPage() {
             </section>
           )}
         </>
+      )}
+
+      {tab === "recent" && (
+        <>
+          {loading ? (
+            <div className="status">Loading recently added videos…</div>
+          ) : videos.length === 0 ? (
+            <div className="status">No recently added videos yet.</div>
+          ) : (
+            <section className="video-grid">
+              {videos.slice(0, 30).map((video) => (
+                <VideoCard key={video.id} video={video} progress={progressMap[video.id]} />
+              ))}
+            </section>
+          )}
+        </>
+      )}
+
+      {tab === "diagnostics" && (
+        <div className="diagnostics-panel">
+          <div className="diagnostics-summary-grid">
+            <button className="diagnostics-card" onClick={() => applyDiagnosticFilter({})}>
+              <strong>Total indexed</strong>
+              <span>{librarySummary?.total_indexed ?? 0}</span>
+            </button>
+            <button className="diagnostics-card" onClick={() => applyDiagnosticFilter({ compatibility_status: "direct_play" })}>
+              <strong>Direct Play</strong>
+              <span>{librarySummary?.direct_play ?? 0}</span>
+            </button>
+            <button className="diagnostics-card" onClick={() => applyDiagnosticFilter({ compatibility_status: "may_play" })}>
+              <strong>May Play</strong>
+              <span>{librarySummary?.may_play ?? 0}</span>
+            </button>
+            <button className="diagnostics-card" onClick={() => applyDiagnosticFilter({ compatibility_status: "may_not_play" })}>
+              <strong>May Not Play</strong>
+              <span>{librarySummary?.may_not_play ?? 0}</span>
+            </button>
+            <button className="diagnostics-card" onClick={() => applyDiagnosticFilter({ compatibility_status: "needs_conversion" })}>
+              <strong>Needs Conversion</strong>
+              <span>{librarySummary?.needs_conversion ?? 0}</span>
+            </button>
+            <button className="diagnostics-card" onClick={() => applyDiagnosticFilter({ compatibility_status: "unknown" })}>
+              <strong>Unknown</strong>
+              <span>{librarySummary?.unknown_compatibility ?? 0}</span>
+            </button>
+            <button className="diagnostics-card" onClick={() => applyDiagnosticFilter({ media_status: "probe_failed_possible_video" })}>
+              <strong>Probe Failed</strong>
+              <span>{librarySummary?.probe_failed_possible_video ?? 0}</span>
+            </button>
+            <button className="diagnostics-card" onClick={() => applyDiagnosticFilter({ thumbnail_status: "failed" })}>
+              <strong>Thumbnail Failed</strong>
+              <span>{librarySummary?.thumbnail_failed ?? 0}</span>
+            </button>
+            <button className="diagnostics-card" onClick={() => setTab("duplicates")}>
+              <strong>Potential duplicate saving</strong>
+              <span>{formatBytes(librarySummary?.last_duplicate_scan.potential_saving ?? 0)}</span>
+            </button>
+            <button className="diagnostics-card" onClick={() => { setProfileOnlyMissingManual(true); }}>
+              <strong>Profiles pending manual check</strong>
+              <span>{librarySummary?.media_profiles_pending_manual_check ?? 0}</span>
+            </button>
+          </div>
+
+          <section className="diagnostics-section">
+            <div className="diagnostics-section-header">
+              <h3>Unique Media Profiles</h3>
+              <span className="diagnostics-hint">Auto guess + manual calibration matrix</span>
+            </div>
+            <div className="media-profiles-toolbar">
+              <label>
+                Effective
+                <select value={profileEffectiveFilter} onChange={(event) => setProfileEffectiveFilter(event.target.value)}>
+                  <option value="all">All</option>
+                  <option value="direct_play">Direct Play</option>
+                  <option value="may_play">May Play</option>
+                  <option value="may_not_play">May Not Play</option>
+                  <option value="needs_conversion">Needs Conversion</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+              </label>
+              <label>
+                Extension
+                <input
+                  value={profileExtensionFilter}
+                  onChange={(event) => setProfileExtensionFilter(event.target.value)}
+                  placeholder=".360"
+                />
+              </label>
+              <label>
+                Sort
+                <select value={profileSort} onChange={(event) => setProfileSort(event.target.value as ProfileSort)}>
+                  <option value="default">Missing manual first, files count desc</option>
+                  <option value="files_count_desc">Files count desc</option>
+                  <option value="extension">Extension</option>
+                  <option value="effective_status">Effective status</option>
+                </select>
+              </label>
+              <label className="checkbox-inline">
+                <input
+                  type="checkbox"
+                  checked={profileOnlyMissingManual}
+                  onChange={(event) => setProfileOnlyMissingManual(event.target.checked)}
+                />
+                Manual status missing only
+              </label>
+            </div>
+
+            {filteredMediaProfiles.length === 0 ? (
+              <p className="status">
+                {profileOnlyMissingManual
+                  ? "All media profiles are already manually checked. Disable the filter to view reviewed profiles."
+                  : "No media profiles found for current filters."}
+              </p>
+            ) : (
+              <div className="media-profile-list">
+                {filteredMediaProfiles.map((profile) => (
+                  <article key={profile.id} className="media-profile-item">
+                    <div className="media-profile-main">
+                      <div className="media-profile-identity">
+                        <strong>{profile.extension} • {profile.video_codec} • {profile.audio_codec}</strong>
+                        <p>{profile.container_format}</p>
+                        <p>
+                          video profile {profile.video_profile}, level {profile.video_level}, pix_fmt {profile.pixel_format},
+                          {" "}audio ch {profile.audio_channels ?? "unknown"}, sample rate {profile.audio_sample_rate ?? "unknown"},
+                          {" "}{profile.width_bucket}x{profile.height_bucket}
+                        </p>
+                      </div>
+                      <div className="media-profile-statuses">
+                        <p><strong>Auto guess:</strong> {profile.auto_compatibility_status}</p>
+                        <p><strong>Manual profile status:</strong> {profile.manual_playback_status ?? "not set"}</p>
+                        <p><strong>Effective status:</strong> {profile.effective_compatibility_status}</p>
+                        <p><strong>Source:</strong> {profile.compatibility_source}</p>
+                        <p><strong>Files:</strong> {profile.files_count}</p>
+                      </div>
+                    </div>
+
+                    {profile.sample_video && (
+                      <div className="media-profile-sample">
+                        <a href={profile.sample_video.watch_url} target="_blank" rel="noopener noreferrer" className="media-profile-sample-link">
+                          {profile.sample_video.thumbnail_url ? (
+                            <img src={profile.sample_video.thumbnail_url} alt={profile.sample_video.title} loading="lazy" />
+                          ) : (
+                            <div className="thumb placeholder">No Thumbnail</div>
+                          )}
+                        </a>
+                        <div>
+                          <a href={profile.sample_video.watch_url} target="_blank" rel="noopener noreferrer" className="media-profile-sample-title">
+                            Open sample in new tab
+                          </a>
+                          <p>{profile.sample_video.title}</p>
+                          <p>{profile.sample_video.relative_path}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="media-profile-actions">
+                      <button className="btn-secondary" disabled={profileActionBusyId === profile.id} onClick={() => onSetProfileStatus(profile.id, "playable")}>Mark Playable</button>
+                      <button className="btn-secondary" disabled={profileActionBusyId === profile.id} onClick={() => onSetProfileStatus(profile.id, "not_playable")}>Mark Not Playable</button>
+                      <button className="btn-secondary" disabled={profileActionBusyId === profile.id} onClick={() => onSetProfileStatus(profile.id, "partially_playable")}>Mark Partially Playable</button>
+                      <button className="btn-secondary" disabled={profileActionBusyId === profile.id} onClick={() => onSetProfileStatus(profile.id, "unknown")}>Mark Unknown</button>
+                      <button className="btn-danger" disabled={profileActionBusyId === profile.id} onClick={() => onClearProfileStatus(profile.id)}>Clear Manual Override</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="diagnostics-section">
+            <div className="diagnostics-section-header">
+              <h3>Probe failed files</h3>
+              <button className="btn-secondary" onClick={() => applyDiagnosticFilter({ probe_status: "failed" })}>View all</button>
+            </div>
+            {probeFailedFiles.length === 0 ? (
+              <p className="status">No probe-failed files.</p>
+            ) : (
+              probeFailedFiles.map((video) => (
+                <a key={video.id} className="diagnostics-item" href={`/watch/${video.id}`} target="_blank" rel="noopener noreferrer">
+                  <div className="thumb placeholder">No Thumbnail</div>
+                  <div>
+                    <strong>{video.title}</strong>
+                    <p>{video.filename}</p>
+                    <p>{video.extension} • {formatBytes(video.size)} • indexed {new Date(video.indexed_at).toLocaleString()}</p>
+                    <p>{video.probe_error ?? "No probe error details"}</p>
+                  </div>
+                </a>
+              ))
+            )}
+          </section>
+
+          <section className="diagnostics-section">
+            <div className="diagnostics-section-header">
+              <h3>Needs conversion files</h3>
+              <button className="btn-secondary" onClick={() => applyDiagnosticFilter({ compatibility_status: "needs_conversion" })}>View all</button>
+            </div>
+            {needsConversionFiles.length === 0 ? (
+              <p className="status">No files needing conversion.</p>
+            ) : (
+              needsConversionFiles.map((video) => (
+                <a key={video.id} className="diagnostics-item" href={`/watch/${video.id}`} target="_blank" rel="noopener noreferrer">
+                  <div>
+                    <strong>{video.title}</strong>
+                    <p>{video.filename}</p>
+                    <p>{video.extension} • {video.video_codec ?? "unknown"} / {video.audio_codec ?? "unknown"}</p>
+                    <p>{video.width && video.height ? `${video.width}x${video.height}` : "Unknown resolution"}</p>
+                    <p>{video.compatibility_reason ?? ""}</p>
+                  </div>
+                </a>
+              ))
+            )}
+          </section>
+
+          <section className="diagnostics-section">
+            <div className="diagnostics-section-header">
+              <h3>Unknown compatibility files</h3>
+              <button className="btn-secondary" onClick={() => applyDiagnosticFilter({ compatibility_status: "unknown" })}>View all</button>
+            </div>
+            {unknownCompatibilityFiles.length === 0 ? (
+              <p className="status">No unknown compatibility files.</p>
+            ) : (
+              unknownCompatibilityFiles.map((video) => (
+                <a key={video.id} className="diagnostics-item" href={`/watch/${video.id}`} target="_blank" rel="noopener noreferrer">
+                  <div>
+                    <strong>{video.title}</strong>
+                    <p>{video.filename}</p>
+                    <p>{video.extension} • {video.container_format ?? "Unknown container"}</p>
+                    {video.probe_error && <p>{video.probe_error}</p>}
+                  </div>
+                </a>
+              ))
+            )}
+          </section>
+
+          <section className="diagnostics-section">
+            <div className="diagnostics-section-header">
+              <h3>Thumbnail failed files</h3>
+              <button className="btn-secondary" onClick={() => applyDiagnosticFilter({ thumbnail_status: "failed" })}>View all</button>
+            </div>
+            {thumbnailFailedFiles.length === 0 ? (
+              <p className="status">No thumbnail failures.</p>
+            ) : (
+              thumbnailFailedFiles.map((video) => (
+                <a key={video.id} className="diagnostics-item" href={`/watch/${video.id}`} target="_blank" rel="noopener noreferrer">
+                  <div>
+                    <strong>{video.title}</strong>
+                    <p>{video.filename}</p>
+                    <p>{video.thumbnail_error ?? "No thumbnail error details"}</p>
+                  </div>
+                </a>
+              ))
+            )}
+          </section>
+        </div>
       )}
 
       {tab === "duplicates" && (

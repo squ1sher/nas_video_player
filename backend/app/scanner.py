@@ -5,11 +5,16 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.compatibility import get_compatibility
 from app.config import Settings
 from app.media_probe import probe_video
 from app.models import Video, WatchProgress
 from app.scan_status import fail_scan, finish_scan, increment_progress, start_scan, update_current_file
+from app.services.media_profile_service import (
+    assign_profile_to_video,
+    build_media_profile_fields,
+    compute_auto_compatibility,
+    upsert_media_profile,
+)
 from app.thumbnails import ensure_thumbnail
 from app.utils.files import VIDEO_EXTENSIONS
 
@@ -78,16 +83,22 @@ def _upsert_video_record(
     width: int | None,
     height: int | None,
     video_codec: str | None,
+    video_profile: str | None,
+    video_level: str | None,
+    pixel_format: str | None,
     audio_codec: str | None,
+    audio_channels: int | None,
+    audio_sample_rate: int | None,
     container_format: str | None,
     thumbnail_path: str | None,
     thumbnail_status: str,
+    thumbnail_error: str | None,
     media_status: str,
     probe_status: str,
     probe_error: str | None,
     compatibility_status: str,
     compatibility_reason: str,
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, Video]:
     relative_path = file_path.relative_to(root).as_posix()
     now = datetime.now(timezone.utc)
 
@@ -105,10 +116,16 @@ def _upsert_video_record(
                 width=width,
                 height=height,
                 video_codec=video_codec,
+                video_profile=video_profile,
+                video_level=video_level,
+                pixel_format=pixel_format,
                 audio_codec=audio_codec,
+                audio_channels=audio_channels,
+                audio_sample_rate=audio_sample_rate,
                 container_format=container_format,
                 thumbnail_path=thumbnail_path,
                 thumbnail_status=thumbnail_status,
+                thumbnail_error=thumbnail_error,
                 media_status=media_status,
                 probe_status=probe_status,
                 probe_error=probe_error,
@@ -118,7 +135,9 @@ def _upsert_video_record(
                 indexed_at=now,
             )
         )
-        return True, False
+        db.flush()
+        created_video = db.query(Video).filter(Video.relative_path == relative_path).first()
+        return True, False, created_video
 
     existing.title = file_path.stem
     existing.filename = file_path.name
@@ -130,10 +149,16 @@ def _upsert_video_record(
     existing.width = width
     existing.height = height
     existing.video_codec = video_codec
+    existing.video_profile = video_profile
+    existing.video_level = video_level
+    existing.pixel_format = pixel_format
     existing.audio_codec = audio_codec
+    existing.audio_channels = audio_channels
+    existing.audio_sample_rate = audio_sample_rate
     existing.container_format = container_format
     existing.thumbnail_path = thumbnail_path
     existing.thumbnail_status = thumbnail_status
+    existing.thumbnail_error = thumbnail_error
     existing.media_status = media_status
     existing.probe_status = probe_status
     existing.probe_error = probe_error
@@ -141,7 +166,7 @@ def _upsert_video_record(
     existing.compatibility_status = compatibility_status
     existing.compatibility_reason = compatibility_reason
     existing.indexed_at = now
-    return False, True
+    return False, True, existing
 
 
 def _compute_folder_path(file_path: Path, root: Path) -> str:
@@ -213,6 +238,31 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                 and abs(existing.modified_ts - stat.st_mtime) < 1e-6
             )
             if unchanged:
+                if existing and existing.media_profile_id is None:
+                    auto_status, auto_reason = compute_auto_compatibility(
+                        existing.extension,
+                        existing.video_codec,
+                        existing.audio_codec,
+                    )
+                    profile_fields = build_media_profile_fields(
+                        extension=existing.extension,
+                        container_format=existing.container_format,
+                        video_codec=existing.video_codec,
+                        video_profile=existing.video_profile,
+                        video_level=existing.video_level,
+                        pixel_format=existing.pixel_format,
+                        audio_codec=existing.audio_codec,
+                        audio_channels=existing.audio_channels,
+                        audio_sample_rate=existing.audio_sample_rate,
+                        width=existing.width,
+                        height=existing.height,
+                    )
+                    profile = upsert_media_profile(db, profile_fields, auto_status=auto_status, auto_reason=auto_reason)
+                    assign_profile_to_video(existing, profile)
+                    if profile.sample_video_id is None:
+                        profile.sample_video_id = existing.id
+                    result.updated += 1
+                    increment_progress(updated_inc=1)
                 continue
 
             logger.info("Indexing file: %s", relative_path)
@@ -222,8 +272,22 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                 increment_progress(probe_failed_inc=1)
 
                 if settings.probe_unknown_extensions and extension not in settings.excluded_extensions_set:
-                    compat = {"status": "unknown", "reason": "Metadata probe failed. Compatibility unknown."}
-                    added, updated = _upsert_video_record(
+                    auto_status, auto_reason = compute_auto_compatibility(extension, None, None)
+                    profile_fields = build_media_profile_fields(
+                        extension=extension,
+                        container_format=None,
+                        video_codec=None,
+                        video_profile=None,
+                        video_level=None,
+                        pixel_format=None,
+                        audio_codec=None,
+                        audio_channels=None,
+                        audio_sample_rate=None,
+                        width=None,
+                        height=None,
+                    )
+                    profile = upsert_media_profile(db, profile_fields, auto_status=auto_status, auto_reason=auto_reason)
+                    added, updated, saved_video = _upsert_video_record(
                         db,
                         existing,
                         file_path,
@@ -235,16 +299,26 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                         width=None,
                         height=None,
                         video_codec=None,
+                        video_profile=None,
+                        video_level=None,
+                        pixel_format=None,
                         audio_codec=None,
+                        audio_channels=None,
+                        audio_sample_rate=None,
                         container_format=None,
                         thumbnail_path=None,
                         thumbnail_status="failed",
+                        thumbnail_error="Thumbnail skipped because metadata probe failed",
                         media_status="probe_failed_possible_video",
                         probe_status="failed",
                         probe_error=probe.error,
-                        compatibility_status=compat["status"],
-                        compatibility_reason=compat["reason"],
+                        compatibility_status=auto_status,
+                        compatibility_reason=auto_reason,
                     )
+                    if saved_video is not None:
+                        assign_profile_to_video(saved_video, profile)
+                        if profile.sample_video_id is None:
+                            profile.sample_video_id = saved_video.id
                     if added:
                         result.added += 1
                         increment_progress(added_inc=1)
@@ -261,9 +335,24 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                     db.delete(existing)
                 continue
 
-            compat = get_compatibility(extension, probe.video_codec, probe.audio_codec)
+            auto_status, auto_reason = compute_auto_compatibility(extension, probe.video_codec, probe.audio_codec)
+            profile_fields = build_media_profile_fields(
+                extension=extension,
+                container_format=probe.container_format,
+                video_codec=probe.video_codec,
+                video_profile=probe.video_profile,
+                video_level=probe.video_level,
+                pixel_format=probe.pixel_format,
+                audio_codec=probe.audio_codec,
+                audio_channels=probe.audio_channels,
+                audio_sample_rate=probe.audio_sample_rate,
+                width=probe.width,
+                height=probe.height,
+            )
+            profile = upsert_media_profile(db, profile_fields, auto_status=auto_status, auto_reason=auto_reason)
             thumb_relative: str | None = None
             thumbnail_status = "pending"
+            thumbnail_error: str | None = None
             try:
                 thumb_path = ensure_thumbnail(file_path, settings.thumbnails_path, relative_path)
                 thumb_relative = thumb_path.name if thumb_path else None
@@ -273,13 +362,15 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                     thumbnail_status = "generated"
                 else:
                     thumbnail_status = "skipped"
+                    thumbnail_error = "Thumbnail generation was skipped"
             except Exception as thumb_exc:  # noqa: BLE001
                 logger.warning("Thumbnail generation failed for %s: %s", relative_path, thumb_exc)
                 result.thumbnail_errors += 1
                 increment_progress(thumbnail_errors_inc=1)
                 thumbnail_status = "failed"
+                thumbnail_error = str(thumb_exc)
 
-            added, updated = _upsert_video_record(
+            added, updated, saved_video = _upsert_video_record(
                 db,
                 existing,
                 file_path,
@@ -291,16 +382,26 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                 width=probe.width,
                 height=probe.height,
                 video_codec=probe.video_codec,
+                video_profile=probe.video_profile,
+                video_level=probe.video_level,
+                pixel_format=probe.pixel_format,
                 audio_codec=probe.audio_codec,
+                audio_channels=probe.audio_channels,
+                audio_sample_rate=probe.audio_sample_rate,
                 container_format=probe.container_format,
                 thumbnail_path=thumb_relative,
                 thumbnail_status=thumbnail_status,
+                thumbnail_error=thumbnail_error,
                 media_status="detected_video",
                 probe_status="success",
                 probe_error=None,
-                compatibility_status=compat["status"],
-                compatibility_reason=compat["reason"],
+                compatibility_status=auto_status,
+                compatibility_reason=auto_reason,
             )
+            if saved_video is not None:
+                assign_profile_to_video(saved_video, profile)
+                if profile.sample_video_id is None:
+                    profile.sample_video_id = saved_video.id
             if added:
                 result.added += 1
                 increment_progress(added_inc=1)

@@ -69,6 +69,20 @@ def run_migrations(engine: Engine) -> None:
         ("folder_path", "VARCHAR(1024)"),
         ("compatibility_status", "VARCHAR(32)"),
         ("compatibility_reason", "VARCHAR(512)"),
+        ("pixel_format", "VARCHAR(64)"),
+        ("thumbnail_error", "TEXT"),
+        ("video_profile", "VARCHAR(64)"),
+        ("video_level", "VARCHAR(32)"),
+        ("audio_channels", "INTEGER"),
+        ("audio_sample_rate", "INTEGER"),
+        ("media_profile_id", "INTEGER"),
+        ("media_profile_key", "VARCHAR(128)"),
+        ("media_profile_version", "VARCHAR(32)"),
+        ("auto_compatibility_status", "VARCHAR(32)"),
+        ("auto_compatibility_reason", "VARCHAR(512)"),
+        ("effective_compatibility_status", "VARCHAR(32)"),
+        ("compatibility_source", "VARCHAR(64)"),
+        ("manual_playback_status", "VARCHAR(32)"),
     ]
     for col, col_def in videos_migrations:
         _add_column_if_missing(engine, "videos", col, col_def)
@@ -77,6 +91,72 @@ def run_migrations(engine: Engine) -> None:
     _create_index_if_missing(engine, "ix_videos_media_status", "videos", "media_status")
     _create_index_if_missing(engine, "ix_videos_probe_status", "videos", "probe_status")
     _create_index_if_missing(engine, "ix_videos_folder_path", "videos", "folder_path")
+    _create_index_if_missing(engine, "ix_videos_media_profile_id", "videos", "media_profile_id")
+    _create_index_if_missing(engine, "ix_videos_media_profile_key", "videos", "media_profile_key")
+
+    # ── media_profiles table ─────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS media_profiles (
+                    id INTEGER PRIMARY KEY,
+                    profile_key VARCHAR(128) NOT NULL UNIQUE,
+                    profile_version VARCHAR(32) NOT NULL DEFAULT 'v1',
+                    extension VARCHAR(16) NOT NULL DEFAULT 'unknown',
+                    container_format VARCHAR(128) NOT NULL DEFAULT 'unknown',
+                    video_codec VARCHAR(64) NOT NULL DEFAULT 'unknown',
+                    video_profile VARCHAR(64) NOT NULL DEFAULT 'unknown',
+                    video_level VARCHAR(32) NOT NULL DEFAULT 'unknown',
+                    pixel_format VARCHAR(64) NOT NULL DEFAULT 'unknown',
+                    audio_codec VARCHAR(64) NOT NULL DEFAULT 'unknown',
+                    audio_channels INTEGER NULL,
+                    audio_sample_rate INTEGER NULL,
+                    width_bucket VARCHAR(16) NOT NULL DEFAULT 'unknown',
+                    height_bucket VARCHAR(16) NOT NULL DEFAULT 'unknown',
+                    sample_video_id INTEGER NULL,
+                    auto_compatibility_status VARCHAR(32) NOT NULL DEFAULT 'unknown',
+                    auto_compatibility_reason VARCHAR(512) NOT NULL DEFAULT 'unknown',
+                    manual_playback_status VARCHAR(32) NULL,
+                    manual_playback_note VARCHAR(1024) NULL,
+                    manual_checked_at DATETIME NULL,
+                    effective_compatibility_status VARCHAR(32) NOT NULL DEFAULT 'unknown',
+                    compatibility_source VARCHAR(64) NOT NULL DEFAULT 'auto_heuristic',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    _create_index_if_missing(engine, "ix_media_profiles_profile_key", "media_profiles", "profile_key")
+
+    # ── media_profiles table – columns that may be missing in older deployments ─
+    media_profile_migrations = [
+        ("profile_version", "VARCHAR(32) NOT NULL DEFAULT 'v1'"),
+        ("extension", "VARCHAR(16) NOT NULL DEFAULT 'unknown'"),
+        ("container_format", "VARCHAR(128) NOT NULL DEFAULT 'unknown'"),
+        ("video_codec", "VARCHAR(64) NOT NULL DEFAULT 'unknown'"),
+        ("video_profile", "VARCHAR(64) NOT NULL DEFAULT 'unknown'"),
+        ("video_level", "VARCHAR(32) NOT NULL DEFAULT 'unknown'"),
+        ("pixel_format", "VARCHAR(64) NOT NULL DEFAULT 'unknown'"),
+        ("audio_codec", "VARCHAR(64) NOT NULL DEFAULT 'unknown'"),
+        ("audio_channels", "INTEGER NULL"),
+        ("audio_sample_rate", "INTEGER NULL"),
+        ("width_bucket", "VARCHAR(16) NOT NULL DEFAULT 'unknown'"),
+        ("height_bucket", "VARCHAR(16) NOT NULL DEFAULT 'unknown'"),
+        ("sample_video_id", "INTEGER NULL"),
+        ("auto_compatibility_status", "VARCHAR(32) NOT NULL DEFAULT 'unknown'"),
+        ("auto_compatibility_reason", "VARCHAR(512) NOT NULL DEFAULT 'unknown'"),
+        ("manual_playback_status", "VARCHAR(32) NULL"),
+        ("manual_playback_note", "VARCHAR(1024) NULL"),
+        ("manual_checked_at", "DATETIME NULL"),
+        ("effective_compatibility_status", "VARCHAR(32) NOT NULL DEFAULT 'unknown'"),
+        ("compatibility_source", "VARCHAR(64) NOT NULL DEFAULT 'auto_heuristic'"),
+        ("updated_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+    ]
+    for col, col_def in media_profile_migrations:
+        _add_column_if_missing(engine, "media_profiles", col, col_def)
 
     logger.info("Database migrations applied successfully")
 

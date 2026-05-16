@@ -54,7 +54,12 @@ class VideoListItem(BaseModel):
     width: int | None
     height: int | None
     video_codec: str | None
+    video_profile: str | None
+    video_level: str | None
+    pixel_format: str | None
     audio_codec: str | None
+    audio_channels: int | None
+    audio_sample_rate: int | None
     thumbnail_url: str | None
     folder_path: str | None
     compatibility_status: str | None
@@ -64,6 +69,15 @@ class VideoListItem(BaseModel):
     probe_error: str | None
     container_format: str | None
     thumbnail_status: str | None
+    thumbnail_error: str | None
+    media_profile_id: int | None
+    media_profile_key: str | None
+    auto_compatibility_status: str | None
+    auto_compatibility_reason: str | None
+    effective_compatibility_status: str | None
+    compatibility_source: str | None
+    manual_playback_status: str | None
+    file_modified_at: datetime | None
     created_at: datetime
     indexed_at: datetime
 
@@ -79,7 +93,12 @@ class VideoDetail(BaseModel):
     width: int | None
     height: int | None
     video_codec: str | None
+    video_profile: str | None
+    video_level: str | None
+    pixel_format: str | None
     audio_codec: str | None
+    audio_channels: int | None
+    audio_sample_rate: int | None
     thumbnail_url: str | None
     folder_path: str | None
     compatibility_status: str | None
@@ -89,6 +108,15 @@ class VideoDetail(BaseModel):
     probe_error: str | None
     container_format: str | None
     thumbnail_status: str | None
+    thumbnail_error: str | None
+    media_profile_id: int | None
+    media_profile_key: str | None
+    auto_compatibility_status: str | None
+    auto_compatibility_reason: str | None
+    effective_compatibility_status: str | None
+    compatibility_source: str | None
+    manual_playback_status: str | None
+    file_modified_at: datetime | None
     created_at: datetime
     updated_at: datetime
     indexed_at: datetime
@@ -117,6 +145,93 @@ class VideoWithProgress(VideoListItem):
 class FolderOut(BaseModel):
     folder_path: str  # relative path, empty string for root
     video_count: int
+
+
+class LastLibraryScanSummary(BaseModel):
+    status: str
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
+    scanned_files: int
+    detected_videos: int
+    probe_failed: int
+    ignored_non_media: int
+    ignored_excluded: int
+    thumbnail_errors: int
+
+
+class LastDuplicateScanSummary(BaseModel):
+    status: str
+    candidate_groups_found: int
+    potential_saving: int
+    finished_at: Optional[datetime]
+
+
+class LibrarySummaryOut(BaseModel):
+    total_indexed: int
+    detected_videos: int
+    probe_failed_possible_video: int
+    direct_play: int
+    may_play: int
+    may_not_play: int
+    needs_conversion: int
+    unknown_compatibility: int
+    thumbnail_generated: int
+    thumbnail_failed: int
+    thumbnail_missing: int
+    total_size: int
+    media_profiles_total: int
+    media_profiles_manual_checked: int
+    media_profiles_pending_manual_check: int
+    media_profiles_playable: int
+    media_profiles_not_playable: int
+    media_profiles_partially_playable: int
+    media_profiles_unknown: int
+    last_library_scan: LastLibraryScanSummary
+    last_duplicate_scan: LastDuplicateScanSummary
+
+
+class MediaProfileSampleVideoOut(BaseModel):
+    id: int
+    title: str
+    filename: str
+    relative_path: str
+    thumbnail_url: str | None
+    watch_url: str
+
+
+class MediaProfileOut(BaseModel):
+    id: int
+    profile_key: str
+    profile_version: str
+    files_count: int
+    sample_video: MediaProfileSampleVideoOut | None
+    extension: str
+    container_format: str
+    video_codec: str
+    video_profile: str
+    video_level: str
+    pixel_format: str
+    audio_codec: str
+    audio_channels: int | None
+    audio_sample_rate: int | None
+    width_bucket: str
+    height_bucket: str
+    auto_compatibility_status: str
+    auto_compatibility_reason: str
+    manual_playback_status: str | None
+    manual_playback_note: str | None
+    manual_checked_at: datetime | None
+    effective_compatibility_status: str
+    compatibility_source: str
+
+
+class MediaProfileDetailOut(MediaProfileOut):
+    videos: list[VideoListItem]
+
+
+class MediaProfilePlaybackStatusIn(BaseModel):
+    manual_playback_status: str
+    manual_playback_note: str | None = None
 
 
 class DuplicateScanStartResponse(BaseModel):

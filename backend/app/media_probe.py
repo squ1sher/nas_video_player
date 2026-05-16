@@ -15,7 +15,12 @@ class ProbeResult:
     width: int | None = None
     height: int | None = None
     video_codec: str | None = None
+    video_profile: str | None = None
+    video_level: str | None = None
+    pixel_format: str | None = None
     audio_codec: str | None = None
+    audio_channels: int | None = None
+    audio_sample_rate: int | None = None
     container_format: str | None = None
     error: str | None = None
 
@@ -63,7 +68,12 @@ def probe_video(path: Path) -> ProbeResult:
         width=video_stream.get("width") if video_stream else None,
         height=video_stream.get("height") if video_stream else None,
         video_codec=video_stream.get("codec_name") if video_stream else None,
+        video_profile=video_stream.get("profile") if video_stream else None,
+        video_level=str(video_stream.get("level")) if video_stream and video_stream.get("level") is not None else None,
+        pixel_format=video_stream.get("pix_fmt") if video_stream else None,
         audio_codec=audio_stream.get("codec_name"),
+        audio_channels=audio_stream.get("channels"),
+        audio_sample_rate=int(audio_stream.get("sample_rate")) if audio_stream.get("sample_rate") else None,
         container_format=format_name,
         error=None,
     )

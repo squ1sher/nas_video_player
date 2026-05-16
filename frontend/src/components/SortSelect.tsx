@@ -3,16 +3,12 @@ import type { SortField, SortOrder } from "../api/client";
 export type SortOption = {
   label: string;
   sort: SortField;
-  order: SortOrder;
 };
 
 export const SORT_OPTIONS: SortOption[] = [
-  { label: "Newest first", sort: "created_at", order: "desc" },
-  { label: "Oldest first", sort: "created_at", order: "asc" },
-  { label: "Title A-Z", sort: "title", order: "asc" },
-  { label: "Title Z-A", sort: "title", order: "desc" },
-  { label: "Duration", sort: "duration", order: "desc" },
-  { label: "File size", sort: "size", order: "desc" },
+  { label: "Date", sort: "file_modified_at" },
+  { label: "Duration", sort: "duration" },
+  { label: "File size", sort: "size" },
 ];
 
 type Props = {
@@ -22,26 +18,29 @@ type Props = {
 };
 
 export function SortSelect({ sort, order, onChange }: Props) {
-  const currentValue = SORT_OPTIONS.findIndex(
-    (o) => o.sort === sort && o.order === order
-  );
-  const selectedIndex = currentValue >= 0 ? currentValue : 0;
+  const currentSort = SORT_OPTIONS.find((option) => option.sort === sort)?.sort ?? "file_modified_at";
 
-  function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const idx = parseInt(e.target.value, 10);
-    const opt = SORT_OPTIONS[idx];
-    if (opt) onChange(opt.sort, opt.order);
+  function handleSortChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const nextSort = e.target.value as SortField;
+    onChange(nextSort, order);
+  }
+
+  function toggleOrder() {
+    onChange(sort, order === "desc" ? "asc" : "desc");
   }
 
   return (
     <div className="sort-controls">
-      <select value={selectedIndex} onChange={handleChange}>
-        {SORT_OPTIONS.map((opt, i) => (
-          <option key={i} value={i}>
+      <select value={currentSort} onChange={handleSortChange}>
+        {SORT_OPTIONS.map((opt) => (
+          <option key={opt.sort} value={opt.sort}>
             {opt.label}
           </option>
         ))}
       </select>
+      <button type="button" className="sort-order-toggle" onClick={toggleOrder}>
+        {order === "desc" ? "Descending" : "Ascending"}
+      </button>
     </div>
   );
 }

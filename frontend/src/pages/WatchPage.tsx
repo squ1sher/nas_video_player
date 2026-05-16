@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { deleteVideo, fetchVideo, getDownloadUrl, getProgress } from "../api/client";
+import {
+  deleteVideo,
+  fetchVideo,
+  getDownloadUrl,
+  getProgress,
+  regenerateThumbnail,
+  reprobeVideo,
+} from "../api/client";
 import { CompatibilityBadge } from "../components/CompatibilityBadge";
 import { VideoPlayer } from "../components/VideoPlayer";
 import type { VideoDetail, WatchProgress } from "../types/video";
@@ -36,6 +43,9 @@ export function WatchPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [reprobeBusy, setReprobeBusy] = useState(false);
+  const [thumbnailBusy, setThumbnailBusy] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -90,6 +100,36 @@ export function WatchPage() {
     }
   };
 
+  const handleReprobe = async () => {
+    if (!video) return;
+    try {
+      setActionMessage(null);
+      setReprobeBusy(true);
+      const updated = await reprobeVideo(video.id);
+      setVideo(updated);
+      setActionMessage("Metadata probe completed.");
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : "Failed to re-probe metadata");
+    } finally {
+      setReprobeBusy(false);
+    }
+  };
+
+  const handleRegenerateThumbnail = async () => {
+    if (!video) return;
+    try {
+      setActionMessage(null);
+      setThumbnailBusy(true);
+      const updated = await regenerateThumbnail(video.id);
+      setVideo(updated);
+      setActionMessage(updated.thumbnail_status === "generated" ? "Thumbnail regenerated." : "Thumbnail regeneration failed.");
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : "Failed to regenerate thumbnail");
+    } finally {
+      setThumbnailBusy(false);
+    }
+  };
+
   return (
     <div className="page watch-page">
       <div className="watch-header">
@@ -106,11 +146,19 @@ export function WatchPage() {
           <a className="btn-secondary" href={getDownloadUrl(video.id)}>
             Download
           </a>
+          <button className="btn-secondary" onClick={handleReprobe} disabled={reprobeBusy || thumbnailBusy}>
+            {reprobeBusy ? "Re-probing..." : "Re-probe metadata"}
+          </button>
+          <button className="btn-secondary" onClick={handleRegenerateThumbnail} disabled={thumbnailBusy || reprobeBusy}>
+            {thumbnailBusy ? "Regenerating..." : "Regenerate thumbnail"}
+          </button>
           <button className="btn-danger" onClick={handleDelete} disabled={deleteBusy}>
             {deleteBusy ? "Deleting..." : "Delete"}
           </button>
         </div>
       </div>
+
+      {actionMessage && <div className="notice">{actionMessage}</div>}
 
       {askResume && progress && (
         <div className="resume-banner">
@@ -140,10 +188,40 @@ export function WatchPage() {
           <strong>Video codec:</strong> {video.video_codec ?? "Unknown"}
         </div>
         <div>
+          <strong>Pixel format:</strong> {video.pixel_format ?? "Unknown"}
+        </div>
+        <div>
           <strong>Audio codec:</strong> {video.audio_codec ?? "Unknown"}
         </div>
         <div>
           <strong>Container:</strong> {video.extension.toUpperCase()}
+        </div>
+        <div>
+          <strong>Container format:</strong> {video.container_format ?? "Unknown"}
+        </div>
+        <div>
+          <strong>Media status:</strong> {video.media_status ?? "Unknown"}
+        </div>
+        <div>
+          <strong>Probe status:</strong> {video.probe_status ?? "Unknown"}
+        </div>
+        <div>
+          <strong>Compatibility:</strong> {video.compatibility_status ?? "Unknown"}
+        </div>
+        <div>
+          <strong>Auto guess:</strong> {video.auto_compatibility_status ?? "Unknown"}
+        </div>
+        <div>
+          <strong>Effective status:</strong> {video.effective_compatibility_status ?? "Unknown"}
+        </div>
+        <div>
+          <strong>Source:</strong> {video.compatibility_source ?? "unknown"}
+        </div>
+        <div>
+          <strong>Manual profile status:</strong> {video.manual_playback_status ?? "not set"}
+        </div>
+        <div>
+          <strong>Thumbnail status:</strong> {video.thumbnail_status ?? "Unknown"}
         </div>
         <div>
           <strong>File size:</strong> {formatSize(video.size)}
@@ -159,6 +237,16 @@ export function WatchPage() {
         {video.compatibility_reason && (
           <div className="compat-detail">
             <strong>Compatibility note:</strong> {video.compatibility_reason}
+          </div>
+        )}
+        {video.probe_error && (
+          <div className="compat-detail">
+            <strong>Probe error:</strong> {video.probe_error}
+          </div>
+        )}
+        {video.thumbnail_error && (
+          <div className="compat-detail">
+            <strong>Thumbnail error:</strong> {video.thumbnail_error}
           </div>
         )}
       </div>

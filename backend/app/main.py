@@ -14,6 +14,8 @@ from app.migrations import run_migrations
 from app.routes.duplicates import router as duplicates_router
 from app.routes.folders import router as folders_router
 from app.routes.health import router as health_router
+from app.routes.library import router as library_router
+from app.routes.media_profiles import router as media_profiles_router
 from app.routes.progress import router as progress_router
 from app.routes.scan import router as scan_router
 from app.routes.videos import router as videos_router
@@ -29,6 +31,8 @@ app = FastAPI(title="NAS Video Player", version="0.2.0")
 
 app.include_router(health_router)
 app.include_router(scan_router)
+app.include_router(library_router)
+app.include_router(media_profiles_router)
 # progress_router MUST come before videos_router so /continue-watching
 # is matched before /{video_id}
 app.include_router(progress_router)
