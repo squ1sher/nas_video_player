@@ -190,3 +190,49 @@ class VideoVariant(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class HlsBatch(Base):
+    __tablename__ = "hls_batches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
+    request_type: Mapped[str] = mapped_column(String(32), nullable=False, default="library")
+    qualities_csv: Mapped[str] = mapped_column(String(64), nullable=False, default="480p,720p,1080p")
+    skip_existing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    force: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    only_missing_hls: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    queued_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    running_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class HlsBatchItem(Base):
+    __tablename__ = "hls_batch_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("hls_batches.id", ondelete="CASCADE"), nullable=False, index=True)
+    video_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("videos.id", ondelete="SET NULL"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
+    skip_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hls_job_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("hls_jobs.id", ondelete="SET NULL"), nullable=True)
+    current_quality: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    progress_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+

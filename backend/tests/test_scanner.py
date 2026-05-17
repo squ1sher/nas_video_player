@@ -1,4 +1,6 @@
 import subprocess
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -267,3 +269,196 @@ def test_sort_oldest_first(tmp_path: Path) -> None:
     assert len(data) == 2
     assert data[0]["title"] == "Old Video"
     assert data[1]["title"] == "New Video"
+
+
+def test_scan_reconciles_stale_hls_variants_when_files_missing(tmp_path: Path) -> None:
+    setup_test_db(tmp_path)
+    root = tmp_path / "videos"
+    root.mkdir(parents=True)
+    source = root / "stale.mp4"
+    source.write_bytes(b"x" * 2_000_000)
+    stat = source.stat()
+
+    from app.database import SessionLocal
+    from app.models import Video, VideoVariant
+
+    db = SessionLocal()
+    video = Video(
+        title="stale",
+        filename="stale.mp4",
+        relative_path="stale.mp4",
+        absolute_path=str(source),
+        extension=".mp4",
+        size=stat.st_size,
+        modified_ts=stat.st_mtime,
+        duration=10.0,
+        width=1920,
+        height=1080,
+        video_codec="h264",
+        audio_codec="aac",
+        folder_path="",
+        media_status="detected_video",
+        probe_status="success",
+        compatibility_status="direct_play",
+        compatibility_reason="ok",
+        indexed_at=datetime.now(timezone.utc),
+    )
+    db.add(video)
+    db.commit()
+    db.refresh(video)
+
+    db.add(VideoVariant(video_id=video.id, variant_type="hls_master", status="completed", quality_label="master"))
+    db.add(VideoVariant(video_id=video.id, variant_type="hls_480p", status="completed", quality_label="480p"))
+    db.commit()
+
+    scan_video_library(db, _build_settings(tmp_path))
+
+    completed_hls_variants = (
+        db.query(VideoVariant)
+        .filter(VideoVariant.video_id == video.id)
+        .filter(VideoVariant.variant_type.in_(["hls_master", "hls_480p"]))
+        .filter(VideoVariant.status == "completed")
+        .count()
+    )
+    db.close()
+
+    assert completed_hls_variants == 0
+
+
+def test_scanner_stops_when_cancellation_requested(tmp_path: Path, monkeypatch) -> None:
+    setup_test_db(tmp_path)
+    root = tmp_path / "videos"
+    root.mkdir(parents=True)
+    for index in range(5):
+        (root / f"v{index}.mp4").write_bytes(b"0" * 2_000_000)
+
+    from app.scan_status import is_cancellation_requested, request_scan_cancellation, start_scan
+
+    def fake_probe(_p):
+        if not is_cancellation_requested():
+            request_scan_cancellation()
+        time.sleep(0.01)
+        return ProbeResult(success=True, has_video_stream=True, duration=10.0, width=1280, height=720, video_codec="h264", audio_codec="aac", container_format="mp4")
+
+    monkeypatch.setattr("app.scanner.probe_video", fake_probe)
+    monkeypatch.setattr("app.scanner.ensure_thumbnail", lambda *args, **kwargs: None)
+
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    start_scan()
+    result = scan_video_library(db, _build_settings(tmp_path))
+    db.close()
+
+    assert result.cancelled is True
+    assert result.scanned_files < 5
+
+
+def test_cancelled_scan_does_not_run_missing_cleanup(tmp_path: Path, monkeypatch) -> None:
+    setup_test_db(tmp_path)
+    root = tmp_path / "videos"
+    root.mkdir(parents=True)
+    existing = root / "exists.mp4"
+    existing.write_bytes(b"0" * 2_000_000)
+
+    from app.database import SessionLocal
+    from app.models import Video
+    from app.scan_status import request_scan_cancellation, start_scan
+
+    db = SessionLocal()
+    stale = Video(
+        title="missing",
+        filename="missing.mp4",
+        relative_path="missing.mp4",
+        absolute_path=str(root / "missing.mp4"),
+        extension=".mp4",
+        size=1,
+        modified_ts=1.0,
+        duration=1.0,
+        width=640,
+        height=360,
+        video_codec="h264",
+        audio_codec="aac",
+        folder_path="",
+        media_status="detected_video",
+        probe_status="success",
+        compatibility_status="direct_play",
+        compatibility_reason="ok",
+        indexed_at=datetime.now(timezone.utc),
+    )
+    db.add(stale)
+    db.commit()
+
+    def fake_probe(_p):
+        request_scan_cancellation()
+        return ProbeResult(success=True, has_video_stream=True, duration=10.0, width=1280, height=720, video_codec="h264", audio_codec="aac", container_format="mp4")
+
+    monkeypatch.setattr("app.scanner.probe_video", fake_probe)
+    monkeypatch.setattr("app.scanner.ensure_thumbnail", lambda *args, **kwargs: None)
+
+    start_scan()
+    result = scan_video_library(db, _build_settings(tmp_path))
+    still_exists = db.query(Video).filter(Video.relative_path == "missing.mp4").first()
+    db.close()
+
+    assert result.cancelled is True
+    assert result.removed_missing == 0
+    assert still_exists is not None
+
+
+def test_indexed_video_is_visible_before_scan_completion(tmp_path: Path, monkeypatch) -> None:
+    setup_test_db(tmp_path)
+    root = tmp_path / "videos"
+    root.mkdir(parents=True)
+    (root / "a.mp4").write_bytes(b"0" * 2_000_000)
+    (root / "b.mp4").write_bytes(b"0" * 2_000_000)
+
+    from app.database import SessionLocal
+    from app.scan_status import start_scan
+
+    second_probe_started = threading.Event()
+    release_second_probe = threading.Event()
+
+    def fake_probe(path: Path):
+        if path.name == "b.mp4":
+            second_probe_started.set()
+            release_second_probe.wait(timeout=2)
+        return ProbeResult(
+            success=True,
+            has_video_stream=True,
+            duration=10.0,
+            width=1280,
+            height=720,
+            video_codec="h264",
+            audio_codec="aac",
+            container_format="mp4",
+        )
+
+    monkeypatch.setattr("app.scanner.probe_video", fake_probe)
+    monkeypatch.setattr("app.scanner.ensure_thumbnail", lambda *args, **kwargs: None)
+
+    start_scan()
+
+    def run_scan_in_thread() -> None:
+        db = SessionLocal()
+        try:
+            scan_video_library(db, _build_settings(tmp_path))
+        finally:
+            db.close()
+
+    scan_thread = threading.Thread(target=run_scan_in_thread)
+    scan_thread.start()
+
+    assert second_probe_started.wait(timeout=2)
+
+    client = make_client(tmp_path)
+    response = client.get("/api/videos")
+    assert response.status_code == 200
+    filenames = {item["filename"] for item in response.json()}
+    assert "a.mp4" in filenames
+
+    release_second_probe.set()
+    scan_thread.join(timeout=3)
+    assert not scan_thread.is_alive()
+
+

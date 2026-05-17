@@ -7,11 +7,11 @@ type Props = {
 export function ScanStatusBar({ status }: Props) {
   if (!status || status.status === "idle") return null;
 
-  if (status.status === "running") {
+  if (status.status === "running" || status.status === "cancelling") {
     return (
       <div className="scan-status scan-running">
         <span className="scan-spinner" />
-        Scanning library
+        {status.status === "cancelling" ? "Cancelling scan" : "Scanning library"}
         {status.current_file ? `: ${status.current_file.split("/").pop()}` : "..."}
       </div>
     );
@@ -21,12 +21,21 @@ export function ScanStatusBar({ status }: Props) {
     return (
       <div className="scan-status scan-done">
         ✓ Scan complete &mdash; {status.scanned_files} scanned, {status.detected_videos} detected videos,{" "}
-        {status.added} added, {status.updated} updated, {status.probe_failed} probe failed
+        {status.existing_unchanged} unchanged, {status.added} added, {status.updated} updated,{" "}
+        {status.removed_missing} removed missing, {status.probe_failed} probe failed
         {status.errors.length > 0 && (
           <span className="scan-errors"> &bull; {status.errors.length} error(s)</span>
         )}
       </div>
     );
+  }
+
+  if (status.status === "cancelled") {
+    return <div className="scan-status scan-failed">Scan cancelled.</div>;
+  }
+
+  if (status.status === "interrupted") {
+    return <div className="scan-status scan-failed">Previous scan was interrupted by application restart.</div>;
   }
 
   if (status.status === "failed") {

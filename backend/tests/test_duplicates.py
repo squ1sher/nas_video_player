@@ -257,3 +257,103 @@ def test_duplicates_summary_completed_with_zero_groups(tmp_path: Path) -> None:
     assert data["duplicate_candidates_found"] == 0
 
 
+def test_duplicate_summary_is_outdated_false_when_idle(tmp_path: Path) -> None:
+    _reset_duplicate_state()
+    client = make_client(tmp_path)
+    response = client.get("/api/duplicates/summary")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["is_outdated"] is False
+    assert data["last_scan_status"] == "idle"
+
+
+def test_mark_duplicates_outdated_after_completed_scan(tmp_path: Path) -> None:
+    """After a library scan, existing duplicate results are marked outdated."""
+    _reset_duplicate_state()
+    setup_test_db(tmp_path)
+    _insert_video(tmp_path=tmp_path, title="A", relative_path="a.mp4", size=1000, duration=10, width=1920, height=1080)
+    _insert_video(tmp_path=tmp_path, title="B", relative_path="b.mp4", size=1000, duration=10, width=1920, height=1080)
+
+    from app.database import SessionLocal
+    from app.services.duplicate_service import mark_duplicates_outdated, run_duplicate_scan
+
+    db = SessionLocal()
+    run_duplicate_scan(db, mode="strict")
+
+    # Verify it's "completed" before mark
+    from app.models import DuplicateScanRun
+    run = db.query(DuplicateScanRun).filter(DuplicateScanRun.mode == "strict").first()
+    assert run is not None
+    assert run.last_scan_status == "completed"
+
+    # Now mark outdated (simulating end of library scan)
+    mark_duplicates_outdated(db)
+
+    db.refresh(run)
+    assert run.last_scan_status == "outdated"
+    db.close()
+
+
+def test_duplicate_summary_is_outdated_true_after_mark(tmp_path: Path) -> None:
+    """GET /api/duplicates/summary returns is_outdated=True after mark."""
+    _reset_duplicate_state()
+    client = make_client(tmp_path)
+    _insert_video(tmp_path=tmp_path, title="X", relative_path="x.mp4", size=999, duration=5, width=1280, height=720)
+
+    from app.database import SessionLocal
+    from app.services.duplicate_service import mark_duplicates_outdated, run_duplicate_scan
+
+    db = SessionLocal()
+    run_duplicate_scan(db, mode="strict")
+    mark_duplicates_outdated(db)
+    db.close()
+
+    response = client.get("/api/duplicates/summary")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["last_scan_status"] == "outdated"
+    assert data["is_outdated"] is True
+
+
+def test_running_duplicate_scan_clears_outdated_flag(tmp_path: Path) -> None:
+    """Running duplicate scan again should clear the outdated state."""
+    _reset_duplicate_state()
+    setup_test_db(tmp_path)
+    _insert_video(tmp_path=tmp_path, title="Y", relative_path="y.mp4", size=500, duration=9, width=1920, height=1080)
+    _insert_video(tmp_path=tmp_path, title="Z", relative_path="z.mp4", size=500, duration=9, width=1920, height=1080)
+
+    from app.database import SessionLocal
+    from app.models import DuplicateScanRun
+    from app.services.duplicate_service import mark_duplicates_outdated, run_duplicate_scan
+
+    db = SessionLocal()
+    run_duplicate_scan(db, mode="strict")
+    mark_duplicates_outdated(db)
+
+    run = db.query(DuplicateScanRun).filter(DuplicateScanRun.mode == "strict").first()
+    assert run is not None and run.last_scan_status == "outdated"
+
+    # Running duplicate scan again should set it back to "completed"
+    run_duplicate_scan(db, mode="strict")
+    db.refresh(run)
+    assert run.last_scan_status == "completed"
+    db.close()
+
+
+def test_mark_outdated_only_affects_completed_and_failed(tmp_path: Path) -> None:
+    """mark_duplicates_outdated should not change 'idle' or already-outdated rows."""
+    _reset_duplicate_state()
+    setup_test_db(tmp_path)
+
+    from app.database import SessionLocal
+    from app.models import DuplicateScanRun
+    from app.services.duplicate_service import mark_duplicates_outdated
+
+    db = SessionLocal()
+    # No scan run row exists - mark_outdated should safely do nothing
+    mark_duplicates_outdated(db)
+    count = db.query(DuplicateScanRun).count()
+    assert count == 0
+    db.close()
+
+

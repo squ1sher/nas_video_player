@@ -24,24 +24,30 @@ class ScanResponse(BaseModel):
 class ScanStartedResponse(BaseModel):
     status: str
     message: str
+    current_status: dict[str, object] | None = None
 
 
 class ScanStatusOut(BaseModel):
-    status: str  # idle | running | completed | failed
+    status: str  # idle | running | completed | failed | interrupted | cancelling | cancelled
+    cancellation_requested: bool = False
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
     scanned_files: int
     detected_videos: int
+    existing_unchanged: int = 0
     probe_failed: int
     ignored_non_media: int
     ignored_excluded: int
     thumbnails_generated: int
     thumbnail_errors: int
+    thumbnail_failed: int = 0
     scanned: int
     added: int
     updated: int
+    removed_missing: int = 0
     errors: list[str]
     current_file: Optional[str]
+    message: str | None = None
 
 
 class VideoListItem(BaseModel):
@@ -299,6 +305,7 @@ class DuplicateSummaryOut(BaseModel):
     potential_saving: int
     last_scan_at: str | None
     mode: str
+    is_outdated: bool = False
 
 
 class HlsPrepareIn(BaseModel):
@@ -338,8 +345,100 @@ class HlsJobOut(BaseModel):
 class HlsGlobalStatusOut(BaseModel):
     running: int
     max_concurrent: int
+    queued_jobs: int = 0
+    active_batch_id: int | None = None
+    active_batch_status: str | None = None
+    active_batch_progress_percent: float | None = None
     recent_failed: int
     recent_completed: int
+
+
+class HlsLibraryBatchIn(BaseModel):
+    qualities: list[str] | None = None
+    skip_existing: bool = True
+    force: bool = False
+    only_missing_hls: bool = True
+
+
+class HlsLibraryBatchOut(BaseModel):
+    batch_id: int | None
+    status: str
+    total_library_videos: int
+    queued_count: int
+    skipped_existing_hls: int = 0
+    skipped_already_queued: int = 0
+    skipped_missing_source: int = 0
+    skipped_invalid: int = 0
+    message: str
+
+
+class HlsBatchCurrentVideoOut(BaseModel):
+    id: int
+    title: str
+    relative_path: str
+
+
+class HlsBatchItemOut(BaseModel):
+    id: int
+    batch_id: int
+    video_id: int | None
+    status: str
+    skip_reason: str | None = None
+    error_message: str | None = None
+    hls_job_id: int | None = None
+    current_quality: str | None = None
+    progress_percent: float | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class HlsBatchDetailOut(BaseModel):
+    id: int
+    status: str
+    total_count: int
+    queued_count: int
+    running_count: int
+    completed_count: int
+    failed_count: int
+    skipped_count: int
+    progress_percent: float
+    estimated_remaining_count: int
+    current_video: HlsBatchCurrentVideoOut | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    items: list[HlsBatchItemOut] = []
+
+
+class HlsDiagnosticsItemOut(BaseModel):
+    video_id: int | None
+    title: str
+    relative_path: str
+    reason: str
+
+
+class HlsDiagnosticsOut(BaseModel):
+    total_videos: int
+    valid_hls: int
+    missing_hls: int
+    db_completed_but_files_missing: int
+    files_exist_but_db_missing: int
+    stale_queued: int
+    stale_running: int
+    active_queued: int
+    active_running: int
+    invalid_source_missing: int
+    details: dict[str, list[HlsDiagnosticsItemOut]] | None = None
+
+
+class HlsRepairOut(BaseModel):
+    checked: int
+    valid_hls: int
+    missing_hls: int
+    db_repaired_to_completed: int
+    stale_completed_invalidated: int
+    stale_queued_reset: int
+    stale_running_reset: int
+    errors: list[str]
 
 
 class PlaybackSourceOut(BaseModel):

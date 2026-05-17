@@ -1,11 +1,37 @@
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from app.config import Settings, get_settings
-from app.scan_status import get_scan_state
+from app.scan_status import get_scan_state, request_scan_cancellation
 from app.scanner import scan_video_library_background
 from app.schemas import ScanStartedResponse, ScanStatusOut
 
 router = APIRouter(prefix="/api", tags=["scan"])
+
+
+def _scan_state_payload(state) -> dict[str, object]:
+    payload = {
+        "status": state.status,
+        "cancellation_requested": state.cancellation_requested,
+        "started_at": state.started_at,
+        "finished_at": state.finished_at,
+        "scanned_files": state.scanned_files,
+        "detected_videos": state.detected_videos,
+        "existing_unchanged": state.existing_unchanged,
+        "probe_failed": state.probe_failed,
+        "ignored_non_media": state.ignored_non_media,
+        "ignored_excluded": state.ignored_excluded,
+        "thumbnails_generated": state.thumbnails_generated,
+        "thumbnail_errors": state.thumbnail_errors,
+        "thumbnail_failed": state.thumbnail_errors,
+        "scanned": state.scanned,
+        "added": state.added,
+        "updated": state.updated,
+        "removed_missing": state.removed_missing,
+        "errors": state.errors,
+        "current_file": state.current_file,
+        "message": state.message,
+    }
+    return ScanStatusOut(**payload).model_dump(mode="json")
 
 
 @router.post("/scan", response_model=ScanStartedResponse, status_code=202)
@@ -15,10 +41,27 @@ def scan_library(
 ) -> ScanStartedResponse:
     """Start a library scan in the background and return immediately."""
     state = get_scan_state()
-    if state.status == "running":
-        return ScanStartedResponse(status="running", message="Scan is already running")
+    if state.status in {"running", "cancelling"}:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "already_running",
+                "message": "Library scan is already running.",
+                "current_status": _scan_state_payload(state),
+            },
+        )
     background_tasks.add_task(scan_video_library_background, settings)
     return ScanStartedResponse(status="started", message="Scan started in background")
+
+
+@router.post("/scan/cancel", response_model=ScanStartedResponse)
+def cancel_scan() -> ScanStartedResponse:
+    state = get_scan_state()
+    if state.status not in {"running", "cancelling"}:
+        return ScanStartedResponse(status="not_running", message="No library scan is currently running.")
+
+    request_scan_cancellation()
+    return ScanStartedResponse(status="cancelling", message="Library scan cancellation requested.")
 
 
 @router.get("/scan/status", response_model=ScanStatusOut)
@@ -27,20 +70,25 @@ def get_scan_status() -> ScanStatusOut:
     state = get_scan_state()
     return ScanStatusOut(
         status=state.status,
+        cancellation_requested=state.cancellation_requested,
         started_at=state.started_at,
         finished_at=state.finished_at,
         scanned_files=state.scanned_files,
         detected_videos=state.detected_videos,
+        existing_unchanged=state.existing_unchanged,
         probe_failed=state.probe_failed,
         ignored_non_media=state.ignored_non_media,
         ignored_excluded=state.ignored_excluded,
         thumbnails_generated=state.thumbnails_generated,
         thumbnail_errors=state.thumbnail_errors,
+        thumbnail_failed=state.thumbnail_errors,
         scanned=state.scanned,
         added=state.added,
         updated=state.updated,
+        removed_missing=state.removed_missing,
         errors=state.errors,
         current_file=state.current_file,
+        message=state.message,
     )
 
 
@@ -50,18 +98,23 @@ def get_last_scan_result() -> ScanStatusOut:
     state = get_scan_state()
     return ScanStatusOut(
         status=state.status,
+        cancellation_requested=state.cancellation_requested,
         started_at=state.started_at,
         finished_at=state.finished_at,
         scanned_files=state.scanned_files,
         detected_videos=state.detected_videos,
+        existing_unchanged=state.existing_unchanged,
         probe_failed=state.probe_failed,
         ignored_non_media=state.ignored_non_media,
         ignored_excluded=state.ignored_excluded,
         thumbnails_generated=state.thumbnails_generated,
         thumbnail_errors=state.thumbnail_errors,
+        thumbnail_failed=state.thumbnail_errors,
         scanned=state.scanned,
         added=state.added,
         updated=state.updated,
+        removed_missing=state.removed_missing,
         errors=state.errors,
         current_file=state.current_file,
+        message=state.message,
     )

@@ -40,9 +40,12 @@ Mini-YouTube style local web video player for Synology NAS.
 
 ### Scan status
 - Scan runs in background (non-blocking)
-- Real-time scan status: `idle | running | completed | failed`
+- Real-time scan status: `idle | running | cancelling | cancelled | completed | failed | interrupted`
 - Animated indicator shows which file is being indexed
 - Completion banner shows counts (scanned / added / updated / errors)
+- You can cancel an active scan from UI (`Cancel scan`); cancellation is graceful
+- Cancelled scan does **not** perform missing-file cleanup
+- If app/container restarts during scan, previous scan is marked `interrupted`; run scan again to complete state
 
 ### Probe-based media discovery
 - Library scan now discovers media primarily via **ffprobe**, not only by extension allowlist
@@ -77,6 +80,15 @@ Mini-YouTube style local web video player for Synology NAS.
   - `1080p` (~5000k video, 160k audio)
 - Upscaling is disabled (qualities above source resolution are skipped).
 - Default DS923+ recommendation: one HLS job at a time.
+
+### Prepare HLS for the entire library (overnight)
+- You can enqueue an overnight batch to prepare HLS for all indexed videos without completed HLS.
+- Default behavior skips existing completed HLS (`skip_existing=true`).
+- Original files are never modified; output is written only to HLS cache.
+- Batch progress is stored in SQLite and survives page reload/browser close.
+- Backend continues processing while browser is closed (as long as container is running).
+- On process restart, previously running HLS jobs are marked interrupted/failed to avoid duplicate ffmpeg execution.
+- Global queue and active batch progress are visible via `/api/hls/status` and batch detail endpoint.
 
 ### Open video in new tab
 - All video cards open the watch page in a **new browser tab**
@@ -302,6 +314,7 @@ Open the app: `http://NAS_IP:8080`
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/scan` | Start background scan |
+| `POST` | `/api/scan/cancel` | Request graceful cancellation of active scan |
 | `GET` | `/api/scan/status` | Current scan status with discovery counters |
 | `GET` | `/api/scan/last-result` | Last scan result |
 
@@ -332,6 +345,25 @@ Open the app: `http://NAS_IP:8080`
 | `GET` | `/api/health` | Health check |
 | `GET` | `/api/hls/jobs` | Recent HLS jobs |
 | `GET` | `/api/hls/status` | Global HLS queue status |
+| `GET` | `/api/hls/diagnostics` | HLS consistency diagnostics (DB state vs HLS files on disk) |
+| `POST` | `/api/hls/repair` | Reconcile/repair HLS DB state against files on disk |
+| `POST` | `/api/hls/batches/library` | Enqueue overnight HLS for library videos (skip existing by default) |
+| `GET` | `/api/hls/batches/{batch_id}` | HLS batch status and optional filtered items |
+| `POST` | `/api/hls/batches/{batch_id}/cancel` | Cancel queued part of an active HLS batch |
+
+### Library-wide HLS request example
+
+```json
+{
+  "qualities": ["480p", "720p", "1080p"],
+  "skip_existing": true,
+  "force": false,
+  "only_missing_hls": true
+}
+```
+
+- `skip_existing=true` by default.
+- `MAX_CONCURRENT_HLS_JOBS=1` by default (recommended for DS923+).
 
 ## Sort options
 

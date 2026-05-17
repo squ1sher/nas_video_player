@@ -8,13 +8,23 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.media_probe import probe_video
 from app.models import Video, WatchProgress
-from app.scan_status import fail_scan, finish_scan, increment_progress, start_scan, update_current_file
+from app.scan_status import (
+    cancel_scan,
+    fail_scan,
+    finish_scan,
+    increment_progress,
+    is_cancellation_requested,
+    mark_scan_interrupted,
+    start_scan,
+    update_current_file,
+)
 from app.services.media_profile_service import (
     assign_profile_to_video,
     build_media_profile_fields,
     compute_auto_compatibility,
     upsert_media_profile,
 )
+from app.services.hls_service import reconcile_hls_variants_for_video
 from app.thumbnails import ensure_thumbnail
 from app.utils.files import VIDEO_EXTENSIONS
 
@@ -26,12 +36,16 @@ class ScanResult:
     scanned_files: int = 0
     detected_videos: int = 0
     probe_failed: int = 0
+    existing_unchanged: int = 0
     ignored_non_media: int = 0
     ignored_excluded: int = 0
     thumbnails_generated: int = 0
     thumbnail_errors: int = 0
     added: int = 0
     updated: int = 0
+    removed_missing: int = 0
+    cancelled: bool = False
+    message: str | None = None
     errors: list[str] = field(default_factory=list)
 
 
@@ -187,28 +201,23 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
         result.errors.append(msg)
         return result
 
-    # ── Step 1: remove DB records whose source file no longer exists ─────────
-    all_db_videos = db.query(Video).all()
-    removed = 0
-    for db_video in all_db_videos:
-        try:
-            disk_path = root / db_video.relative_path
-            if not disk_path.exists() or not disk_path.is_file():
-                logger.info("Source file missing, removing from index: %s", db_video.relative_path)
-                db.query(WatchProgress).filter(WatchProgress.video_id == db_video.id).delete()
-                db.delete(db_video)
-                removed += 1
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Error checking file for removal %s: %s", db_video.relative_path, exc)
-    if removed:
-        db.commit()
-        logger.info("Removed %d stale DB records", removed)
-
-    # ── Step 2: index new / changed files ───────────────────────────────────
+    # ── Step 1: index new / changed files ───────────────────────────────────
     files = iter_library_files(root)
     logger.info("Found %d candidate files", len(files))
 
+    def _cancel_now() -> ScanResult:
+        result.cancelled = True
+        result.message = "Library scan was cancelled by user."
+        db.commit()
+        return result
+
+    if is_cancellation_requested():
+        return _cancel_now()
+
     for file_path in files:
+        if is_cancellation_requested():
+            return _cancel_now()
+
         result.scanned_files += 1
         increment_progress(scanned_files_inc=1)
         update_current_file(str(file_path))
@@ -238,6 +247,15 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                 and abs(existing.modified_ts - stat.st_mtime) < 1e-6
             )
             if unchanged:
+                if is_cancellation_requested():
+                    return _cancel_now()
+                if existing is not None and existing.media_status == "detected_video":
+                    if reconcile_hls_variants_for_video(db, settings, existing.id):
+                        logger.warning(
+                            "Reset stale HLS DB state for video_id=%s relative_path=%s because files are missing",
+                            existing.id,
+                            existing.relative_path,
+                        )
                 if existing and existing.media_profile_id is None:
                     auto_status, auto_reason = compute_auto_compatibility(
                         existing.extension,
@@ -263,10 +281,15 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                         profile.sample_video_id = existing.id
                     result.updated += 1
                     increment_progress(updated_inc=1)
+                else:
+                    result.existing_unchanged += 1
+                    increment_progress(existing_unchanged_inc=1)
                 continue
 
             logger.info("Indexing file: %s", relative_path)
             probe = probe_video(file_path)
+            if is_cancellation_requested():
+                return _cancel_now()
             if not probe.success:
                 result.probe_failed += 1
                 increment_progress(probe_failed_inc=1)
@@ -353,6 +376,8 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
             thumb_relative: str | None = None
             thumbnail_status = "pending"
             thumbnail_error: str | None = None
+            if is_cancellation_requested():
+                return _cancel_now()
             try:
                 thumb_path = ensure_thumbnail(file_path, settings.thumbnails_path, relative_path)
                 thumb_relative = thumb_path.name if thumb_path else None
@@ -402,6 +427,13 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                 assign_profile_to_video(saved_video, profile)
                 if profile.sample_video_id is None:
                     profile.sample_video_id = saved_video.id
+                if saved_video.media_status == "detected_video":
+                    if reconcile_hls_variants_for_video(db, settings, saved_video.id):
+                        logger.warning(
+                            "Reset stale HLS DB state for video_id=%s relative_path=%s because files are missing",
+                            saved_video.id,
+                            saved_video.relative_path,
+                        )
             if added:
                 result.added += 1
                 increment_progress(added_inc=1)
@@ -415,14 +447,38 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
             logger.exception(error_msg)
             result.errors.append(error_msg)
             increment_progress(error=error_msg)
+        finally:
+            # Commit each file iteration so /api/videos can reflect new rows while scan is still running.
+            db.commit()
+
+    if is_cancellation_requested():
+        return _cancel_now()
+
+    # ── Step 2: remove DB records whose source file no longer exists ────────
+    all_db_videos = db.query(Video).all()
+    for db_video in all_db_videos:
+        if is_cancellation_requested():
+            return _cancel_now()
+        try:
+            disk_path = root / db_video.relative_path
+            if not disk_path.exists() or not disk_path.is_file():
+                logger.info("Source file missing, removing from index: %s", db_video.relative_path)
+                db.query(WatchProgress).filter(WatchProgress.video_id == db_video.id).delete()
+                db.delete(db_video)
+                result.removed_missing += 1
+                increment_progress(removed_missing_inc=1)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Error checking file for removal %s: %s", db_video.relative_path, exc)
 
     db.commit()
     logger.info(
-        "Scan completed scanned_files=%d detected_videos=%d added=%d updated=%d errors=%d",
+        "Scan completed scanned_files=%d detected_videos=%d unchanged=%d added=%d updated=%d removed_missing=%d errors=%d",
         result.scanned_files,
         result.detected_videos,
+        result.existing_unchanged,
         result.added,
         result.updated,
+        result.removed_missing,
         len(result.errors),
     )
     return result
@@ -431,28 +487,60 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
 def scan_video_library_background(settings: Settings) -> None:
     """Run scan in a background task with its own database session."""
     from app.database import SessionLocal
+    from app.services.duplicate_service import mark_duplicates_outdated
 
     start_scan()
     db = SessionLocal()
     try:
         result = scan_video_library(db, settings)
-        finish_scan(
-            scanned_files=result.scanned_files,
-            detected_videos=result.detected_videos,
-            probe_failed=result.probe_failed,
-            ignored_non_media=result.ignored_non_media,
-            ignored_excluded=result.ignored_excluded,
-            thumbnails_generated=result.thumbnails_generated,
-            thumbnail_errors=result.thumbnail_errors,
-            added=result.added,
-            updated=result.updated,
-            errors=result.errors,
-        )
+        if result.cancelled:
+            cancel_scan(
+                scanned_files=result.scanned_files,
+                detected_videos=result.detected_videos,
+                probe_failed=result.probe_failed,
+                ignored_non_media=result.ignored_non_media,
+                ignored_excluded=result.ignored_excluded,
+                thumbnails_generated=result.thumbnails_generated,
+                thumbnail_errors=result.thumbnail_errors,
+                added=result.added,
+                updated=result.updated,
+                existing_unchanged=result.existing_unchanged,
+                removed_missing=result.removed_missing,
+                errors=result.errors,
+                message=result.message or "Library scan was cancelled by user.",
+            )
+        else:
+            finish_scan(
+                scanned_files=result.scanned_files,
+                detected_videos=result.detected_videos,
+                probe_failed=result.probe_failed,
+                ignored_non_media=result.ignored_non_media,
+                ignored_excluded=result.ignored_excluded,
+                thumbnails_generated=result.thumbnails_generated,
+                thumbnail_errors=result.thumbnail_errors,
+                added=result.added,
+                updated=result.updated,
+                existing_unchanged=result.existing_unchanged,
+                removed_missing=result.removed_missing,
+                errors=result.errors,
+                message=result.message,
+            )
+            # After a successful library scan (even with errors/unchanged), mark
+            # any stored duplicate results as outdated so the user knows to re-run
+            # duplicate detection.
+            try:
+                mark_duplicates_outdated(db)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to mark duplicates as outdated after scan: %s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Background scan failed: %s", exc)
         fail_scan(str(exc))
     finally:
         db.close()
+
+
+def recover_scan_runtime_state() -> None:
+    mark_scan_interrupted("Library scan was interrupted by application restart.")
 
 
 def is_supported_extension(extension: str) -> bool:

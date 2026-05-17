@@ -5,7 +5,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - /volume1/sclad/Wochya/Media/Running/Video:/media/videos:rw
+      - /volume1/sclad:/media/videos:rw
       - /volume1/docker/video-player/data:/app/data
       - /volume1/docker/video-player/thumbnails:/app/thumbnails
       - /volume1/docker/video-player/cache:/app/cache

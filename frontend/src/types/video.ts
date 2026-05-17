@@ -90,21 +90,26 @@ export type VideoWithProgress = VideoListItem & {
 };
 
 export type ScanStatus = {
-  status: "idle" | "running" | "completed" | "failed";
+  status: "idle" | "running" | "completed" | "failed" | "interrupted" | "cancelling" | "cancelled";
+  cancellation_requested: boolean;
   started_at: string | null;
   finished_at: string | null;
   scanned_files: number;
   detected_videos: number;
+  existing_unchanged: number;
   probe_failed: number;
   ignored_non_media: number;
   ignored_excluded: number;
   thumbnails_generated: number;
   thumbnail_errors: number;
+  thumbnail_failed: number;
   scanned: number;
   added: number;
   updated: number;
+  removed_missing: number;
   errors: string[];
   current_file: string | null;
+  message: string | null;
 };
 
 export type ScanStartedResponse = {
@@ -175,12 +180,13 @@ export type DuplicateGroup = {
 };
 
 export type DuplicateSummary = {
-  last_scan_status: "idle" | "running" | "completed" | "failed";
+  last_scan_status: "idle" | "running" | "completed" | "failed" | "outdated";
   candidate_groups_found: number;
   duplicate_candidates_found: number;
   potential_saving: number;
   last_scan_at: string | null;
   mode: DuplicateMode;
+  is_outdated: boolean;
 };
 
 export type LibraryLastScanSummary = {
@@ -299,8 +305,93 @@ export type HlsJob = {
 export type HlsGlobalStatus = {
   running: number;
   max_concurrent: number;
+  queued_jobs: number;
+  active_batch_id: number | null;
+  active_batch_status: string | null;
+  active_batch_progress_percent: number | null;
   recent_failed: number;
   recent_completed: number;
+};
+
+export type HlsLibraryBatchResponse = {
+  batch_id: number | null;
+  status: "queued" | "nothing_to_do";
+  total_library_videos: number;
+  queued_count: number;
+  skipped_existing_hls: number;
+  skipped_already_queued: number;
+  skipped_missing_source: number;
+  skipped_invalid: number;
+  message: string;
+};
+
+export type HlsBatchCurrentVideo = {
+  id: number;
+  title: string;
+  relative_path: string;
+};
+
+export type HlsBatchItem = {
+  id: number;
+  batch_id: number;
+  video_id: number | null;
+  status: "queued" | "running" | "completed" | "failed" | "skipped";
+  skip_reason: string | null;
+  error_message: string | null;
+  hls_job_id: number | null;
+  current_quality: string | null;
+  progress_percent: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type HlsBatchDetail = {
+  id: number;
+  status: string;
+  total_count: number;
+  queued_count: number;
+  running_count: number;
+  completed_count: number;
+  failed_count: number;
+  skipped_count: number;
+  progress_percent: number;
+  estimated_remaining_count: number;
+  current_video: HlsBatchCurrentVideo | null;
+  started_at: string | null;
+  finished_at: string | null;
+  items: HlsBatchItem[];
+};
+
+export type HlsRepairResponse = {
+  checked: number;
+  valid_hls: number;
+  missing_hls: number;
+  db_repaired_to_completed: number;
+  stale_completed_invalidated: number;
+  stale_queued_reset: number;
+  stale_running_reset: number;
+  errors: string[];
+};
+
+export type HlsDiagnosticsItem = {
+  video_id: number | null;
+  title: string;
+  relative_path: string;
+  reason: string;
+};
+
+export type HlsDiagnostics = {
+  total_videos: number;
+  valid_hls: number;
+  missing_hls: number;
+  db_completed_but_files_missing: number;
+  files_exist_but_db_missing: number;
+  stale_queued: number;
+  stale_running: number;
+  active_queued: number;
+  active_running: number;
+  invalid_source_missing: number;
+  details: Record<string, HlsDiagnosticsItem[]> | null;
 };
 
 export type PlaybackSource = {

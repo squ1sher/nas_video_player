@@ -5,8 +5,12 @@ import type {
   DuplicateSummary,
   FolderInfo,
   HlsGlobalStatus,
+  HlsDiagnostics,
+  HlsBatchDetail,
   HlsJob,
+  HlsLibraryBatchResponse,
   HlsPrepareResponse,
+  HlsRepairResponse,
   HlsVideoStatus,
   LibrarySummary,
   MediaProfileDetail,
@@ -25,8 +29,21 @@ const API_BASE = "/api";
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(body || `Request failed with status ${response.status}`);
+    const text = await response.text();
+    let message = text || `Request failed with status ${response.status}`;
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed?.detail === "string") {
+        message = parsed.detail;
+      } else if (typeof parsed?.detail?.message === "string") {
+        message = parsed.detail.message;
+      } else if (typeof parsed?.message === "string") {
+        message = parsed.message;
+      }
+    } catch {
+      // keep raw text fallback
+    }
+    throw new Error(message);
   }
   return (await response.json()) as T;
 }
@@ -108,9 +125,76 @@ export async function getHlsGlobalStatus(): Promise<HlsGlobalStatus> {
   return handleResponse<HlsGlobalStatus>(await fetch(`${API_BASE}/hls/status?t=${Date.now()}`, { cache: "no-store" }));
 }
 
+export async function createLibraryHlsBatch(body: {
+  qualities?: string[];
+  skip_existing?: boolean;
+  force?: boolean;
+  only_missing_hls?: boolean;
+} = {}): Promise<HlsLibraryBatchResponse> {
+  return handleResponse<HlsLibraryBatchResponse>(
+    await fetch(`${API_BASE}/hls/batches/library`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        qualities: body.qualities ?? ["480p", "720p", "1080p"],
+        skip_existing: body.skip_existing ?? true,
+        force: body.force ?? false,
+        only_missing_hls: body.only_missing_hls ?? true,
+      }),
+    })
+  );
+}
+
+export async function getHlsBatch(
+  batchId: number,
+  opts: { include_items?: boolean; item_status?: string; limit?: number; offset?: number } = {},
+): Promise<HlsBatchDetail> {
+  const params = new URLSearchParams();
+  params.set("include_items", String(opts.include_items ?? false));
+  if (opts.item_status) params.set("item_status", opts.item_status);
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+  params.set("t", String(Date.now()));
+
+  return handleResponse<HlsBatchDetail>(await fetch(`${API_BASE}/hls/batches/${batchId}?${params}`, { cache: "no-store" }));
+}
+
+export async function cancelHlsBatch(batchId: number): Promise<HlsBatchDetail> {
+  return handleResponse<HlsBatchDetail>(
+    await fetch(`${API_BASE}/hls/batches/${batchId}/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    })
+  );
+}
+
+export async function repairStaleHls(): Promise<HlsRepairResponse> {
+  return handleResponse<HlsRepairResponse>(
+    await fetch(`${API_BASE}/hls/repair`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    })
+  );
+}
+
+export async function getHlsDiagnostics(opts: { details?: boolean; limit?: number; offset?: number } = {}): Promise<HlsDiagnostics> {
+  const params = new URLSearchParams();
+  params.set("details", String(opts.details ?? false));
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+  params.set("t", String(Date.now()));
+  return handleResponse<HlsDiagnostics>(await fetch(`${API_BASE}/hls/diagnostics?${params}`, { cache: "no-store" }));
+}
+
 export async function runScan(): Promise<ScanStartedResponse> {
   return handleResponse<ScanStartedResponse>(
     await fetch(`${API_BASE}/scan`, { method: "POST" })
+  );
+}
+
+export async function cancelScan(): Promise<ScanStartedResponse> {
+  return handleResponse<ScanStartedResponse>(
+    await fetch(`${API_BASE}/scan/cancel`, { method: "POST" })
   );
 }
 

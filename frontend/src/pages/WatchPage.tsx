@@ -188,7 +188,7 @@ export function WatchPage() {
       await prepareVideoHls(video.id, { force: false, qualities: ["480p", "720p", "1080p"] });
       const status = await getVideoHlsStatus(video.id);
       setHlsStatus(status);
-      setActionMessage("Preparing streaming versions...");
+      setActionMessage("Preparing HLS...");
     } catch (err) {
       setActionMessage(err instanceof Error ? err.message : "Failed to start HLS preparation");
     } finally {
@@ -267,7 +267,7 @@ export function WatchPage() {
             </select>
           </label>
           <button className="btn-secondary" onClick={handlePrepareHls} disabled={hlsBusy || hlsStatus?.status === "running"}>
-            {hlsStatus?.status === "running" ? "Preparing streaming versions..." : "Prepare streaming versions"}
+            {hlsStatus?.status === "running" ? "Preparing HLS..." : "Prepare HLS"}
           </button>
           {hlsStatus?.status === "completed" && playbackSource?.source_type !== "hls" && (
             <button className="btn-secondary" onClick={handleUseHls}>Use HLS</button>

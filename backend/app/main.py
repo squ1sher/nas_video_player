@@ -20,6 +20,8 @@ from app.routes.media_profiles import router as media_profiles_router
 from app.routes.progress import router as progress_router
 from app.routes.scan import router as scan_router
 from app.routes.videos import router as videos_router
+from app.scanner import recover_scan_runtime_state
+from app.services.hls_service import ensure_batch_worker_started, recover_hls_runtime_state
 from app.utils.logging_config import configure_logging
 
 settings = get_settings()
@@ -48,6 +50,9 @@ app.include_router(videos_router)
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
     run_migrations(engine)
+    recover_scan_runtime_state()
+    recover_hls_runtime_state()
+    ensure_batch_worker_started()
     logger.info("Application started")
     logger.info("Video library path: %s", settings.video_library_path)
 

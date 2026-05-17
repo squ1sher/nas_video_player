@@ -240,5 +240,98 @@ def run_migrations(engine: Engine) -> None:
     for col, col_def in video_variant_migrations:
         _add_column_if_missing(engine, "video_variants", col, col_def)
 
+    # ── hls_batches table ─────────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS hls_batches (
+                    id INTEGER PRIMARY KEY,
+                    status VARCHAR(32) NOT NULL DEFAULT 'queued',
+                    request_type VARCHAR(32) NOT NULL DEFAULT 'library',
+                    qualities_csv VARCHAR(64) NOT NULL DEFAULT '480p,720p,1080p',
+                    skip_existing BOOLEAN NOT NULL DEFAULT 1,
+                    force BOOLEAN NOT NULL DEFAULT 0,
+                    only_missing_hls BOOLEAN NOT NULL DEFAULT 1,
+                    total_count INTEGER NOT NULL DEFAULT 0,
+                    queued_count INTEGER NOT NULL DEFAULT 0,
+                    running_count INTEGER NOT NULL DEFAULT 0,
+                    completed_count INTEGER NOT NULL DEFAULT 0,
+                    failed_count INTEGER NOT NULL DEFAULT 0,
+                    skipped_count INTEGER NOT NULL DEFAULT 0,
+                    progress_percent FLOAT NOT NULL DEFAULT 0,
+                    error_message TEXT NULL,
+                    started_at DATETIME NULL,
+                    finished_at DATETIME NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    _create_index_if_missing(engine, "ix_hls_batches_status", "hls_batches", "status")
+
+    hls_batch_migrations = [
+        ("request_type", "VARCHAR(32) NOT NULL DEFAULT 'library'"),
+        ("qualities_csv", "VARCHAR(64) NOT NULL DEFAULT '480p,720p,1080p'"),
+        ("skip_existing", "BOOLEAN NOT NULL DEFAULT 1"),
+        ("force", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("only_missing_hls", "BOOLEAN NOT NULL DEFAULT 1"),
+        ("queued_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("running_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("completed_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("failed_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("skipped_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("progress_percent", "FLOAT NOT NULL DEFAULT 0"),
+        ("error_message", "TEXT NULL"),
+        ("started_at", "DATETIME NULL"),
+        ("finished_at", "DATETIME NULL"),
+        ("updated_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+    ]
+    for col, col_def in hls_batch_migrations:
+        _add_column_if_missing(engine, "hls_batches", col, col_def)
+
+    # ── hls_batch_items table ────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS hls_batch_items (
+                    id INTEGER PRIMARY KEY,
+                    batch_id INTEGER NOT NULL,
+                    video_id INTEGER NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'queued',
+                    skip_reason VARCHAR(64) NULL,
+                    error_message TEXT NULL,
+                    hls_job_id INTEGER NULL,
+                    current_quality VARCHAR(32) NULL,
+                    progress_percent FLOAT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    started_at DATETIME NULL,
+                    finished_at DATETIME NULL
+                )
+                """
+            )
+        )
+
+    _create_index_if_missing(engine, "ix_hls_batch_items_batch_id", "hls_batch_items", "batch_id")
+    _create_index_if_missing(engine, "ix_hls_batch_items_video_id", "hls_batch_items", "video_id")
+    _create_index_if_missing(engine, "ix_hls_batch_items_status", "hls_batch_items", "status")
+
+    hls_batch_item_migrations = [
+        ("skip_reason", "VARCHAR(64) NULL"),
+        ("error_message", "TEXT NULL"),
+        ("hls_job_id", "INTEGER NULL"),
+        ("current_quality", "VARCHAR(32) NULL"),
+        ("progress_percent", "FLOAT NULL"),
+        ("started_at", "DATETIME NULL"),
+        ("finished_at", "DATETIME NULL"),
+        ("updated_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+    ]
+    for col, col_def in hls_batch_item_migrations:
+        _add_column_if_missing(engine, "hls_batch_items", col, col_def)
+
     logger.info("Database migrations applied successfully")
 

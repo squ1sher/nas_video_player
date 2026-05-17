@@ -230,6 +230,7 @@ def load_duplicate_summary(db: Session, mode: str = "strict") -> dict[str, objec
             "potential_saving": 0,
             "last_scan_at": None,
             "mode": mode,
+            "is_outdated": False,
         }
 
     return {
@@ -239,6 +240,7 @@ def load_duplicate_summary(db: Session, mode: str = "strict") -> dict[str, objec
         "potential_saving": run.potential_saving,
         "last_scan_at": run.last_scan_at.isoformat() if run.last_scan_at else None,
         "mode": mode,
+        "is_outdated": run.last_scan_status == "outdated",
     }
 
 
@@ -247,6 +249,21 @@ def run_duplicate_scan(db: Session, mode: str = "strict") -> dict[str, int | str
     save_duplicate_groups(db, mode, groups)
     save_duplicate_summary(db, mode, summary)
     return summary
+
+
+def mark_duplicates_outdated(db: Session) -> None:
+    """Mark all duplicate scan results as outdated after a successful library scan.
+
+    After the library scan finishes successfully, previously computed duplicate
+    groups may no longer reflect the current library state.  This sets every
+    DuplicateScanRun row to 'outdated' so the frontend can warn the user.
+    The flag is cleared again when the user runs a new duplicate scan.
+    """
+    runs = db.query(DuplicateScanRun).all()
+    for run in runs:
+        if run.last_scan_status in {"completed", "failed"}:
+            run.last_scan_status = "outdated"
+    db.commit()
 
 
 

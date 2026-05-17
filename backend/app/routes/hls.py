@@ -8,6 +8,11 @@ from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import Video
 from app.schemas import (
+    HlsBatchDetailOut,
+    HlsDiagnosticsOut,
+    HlsLibraryBatchIn,
+    HlsLibraryBatchOut,
+    HlsRepairOut,
     HlsGlobalStatusOut,
     HlsJobOut,
     HlsPrepareIn,
@@ -16,9 +21,14 @@ from app.schemas import (
     PlaybackSourceOut,
 )
 from app.services.hls_service import (
+    cancel_hls_batch,
+    create_library_batch,
+    get_hls_batch_detail,
+    get_hls_library_diagnostics,
     get_global_hls_status,
     get_hls_video_status,
     list_hls_jobs,
+    repair_stale_hls_for_library,
     resolve_hls_path,
     start_hls_prepare,
     validate_hls_quality,
@@ -202,4 +212,101 @@ def get_hls_status(
     settings: Settings = Depends(get_settings),
 ) -> HlsGlobalStatusOut:
     return HlsGlobalStatusOut(**get_global_hls_status(db, settings))
+
+
+@global_hls_router.post("/batches/library", response_model=HlsLibraryBatchOut, status_code=202)
+def create_library_hls_batch(
+    body: HlsLibraryBatchIn,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> HlsLibraryBatchOut:
+    payload = create_library_batch(
+        db,
+        settings,
+        qualities=body.qualities,
+        skip_existing=body.skip_existing,
+        force=body.force,
+        only_missing_hls=body.only_missing_hls,
+    )
+    return HlsLibraryBatchOut(**payload)
+
+
+@global_hls_router.get("/batches/{batch_id}", response_model=HlsBatchDetailOut)
+def get_hls_batch(
+    batch_id: int,
+    include_items: bool = True,
+    item_status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+) -> HlsBatchDetailOut:
+    payload = get_hls_batch_detail(
+        db,
+        batch_id,
+        include_items=include_items,
+        item_status=item_status,
+        limit=limit,
+        offset=offset,
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail="HLS batch not found")
+    return HlsBatchDetailOut(**payload)
+
+
+@global_hls_router.post("/batches/{batch_id}/cancel", response_model=HlsBatchDetailOut)
+def cancel_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+) -> HlsBatchDetailOut:
+    ok = cancel_hls_batch(db, batch_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="HLS batch not found")
+    payload = get_hls_batch_detail(
+        db,
+        batch_id,
+        include_items=False,
+        item_status=None,
+        limit=1,
+        offset=0,
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail="HLS batch not found")
+    return HlsBatchDetailOut(**payload)
+
+
+@global_hls_router.get("/diagnostics", response_model=HlsDiagnosticsOut)
+def get_hls_diagnostics(
+    limit: int = 100,
+    offset: int = 0,
+    details: bool = False,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> HlsDiagnosticsOut:
+    payload = get_hls_library_diagnostics(
+        db,
+        settings,
+        limit=limit,
+        offset=offset,
+        details=details,
+    )
+    return HlsDiagnosticsOut(**payload)
+
+
+@global_hls_router.post("/repair", response_model=HlsRepairOut)
+def repair_stale_hls(
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> HlsRepairOut:
+    payload = repair_stale_hls_for_library(db, settings)
+    return HlsRepairOut(**payload)
+
+
+@global_hls_router.post("/repair-stale", response_model=HlsRepairOut)
+def repair_stale_hls_legacy(
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> HlsRepairOut:
+    payload = repair_stale_hls_for_library(db, settings)
+    return HlsRepairOut(**payload)
+
 

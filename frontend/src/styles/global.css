@@ -193,6 +193,12 @@ button {
   font-size: 14px;
 }
 
+.notice-warning {
+  background: #3b2e00;
+  color: #f0c040;
+  border: 1px solid #6b5200;
+}
+
 .error {
   margin-bottom: 12px;
   padding: 10px 14px;
@@ -249,6 +255,12 @@ button {
 
 .scan-errors {
   color: #ff8888;
+}
+
+.library-updating-badge {
+  margin: -4px 0 10px;
+  color: #9fb5c9;
+  font-size: 12px;
 }
 
 /* ── Tab navigation ── */

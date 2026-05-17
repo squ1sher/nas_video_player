@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  cancelScan,
+  cancelHlsBatch,
   clearMediaProfilePlaybackStatus,
+  createLibraryHlsBatch,
   deleteVideo,
   fetchVideos,
   getContinueWatching,
   getDuplicateGroups,
+  getHlsDiagnostics,
   getMediaProfiles,
+  repairStaleHls,
+  getHlsBatch,
+  getHlsGlobalStatus,
   getLibrarySummary,
   getDuplicateStatus,
   getDuplicateSummary,
@@ -24,6 +31,9 @@ import type {
   DuplicateGroup,
   DuplicateScanStatus,
   DuplicateSummary,
+  HlsBatchDetail,
+  HlsDiagnostics,
+  HlsGlobalStatus,
   LibrarySummary,
   ManualPlaybackStatus,
   MediaProfileItem,
@@ -85,6 +95,16 @@ export function LibraryPage() {
   const [duplicateLoading, setDuplicateLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [hlsGlobal, setHlsGlobal] = useState<HlsGlobalStatus | null>(null);
+  const [activeHlsBatch, setActiveHlsBatch] = useState<HlsBatchDetail | null>(null);
+  const [hlsBatchBusy, setHlsBatchBusy] = useState(false);
+  const [hlsCancelBusy, setHlsCancelBusy] = useState(false);
+  const [hlsRepairBusy, setHlsRepairBusy] = useState(false);
+  const [hlsMaintenanceMessage, setHlsMaintenanceMessage] = useState<string | null>(null);
+  const [hlsDiagnostics, setHlsDiagnostics] = useState<HlsDiagnostics | null>(null);
+  const [showHlsLibraryConfirm, setShowHlsLibraryConfirm] = useState(false);
+  const [hlsSkipExisting, setHlsSkipExisting] = useState(true);
+  const [hlsForceRegenerate, setHlsForceRegenerate] = useState(false);
   const [search, setSearch] = useState("");
   const [playbackFilter, setPlaybackFilter] = useState<string>("all");
   const [mediaStatusFilter, setMediaStatusFilter] = useState<string | undefined>(undefined);
@@ -109,6 +129,8 @@ export function LibraryPage() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const libraryPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const duplicatePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const liveRefreshInFlightRef = useRef(false);
+  const lastLiveRefreshAtRef = useRef(0);
 
   const folderTree = useMemo(() => buildFolderTree(folderVideos), [folderVideos]);
   const groupedVideos = useMemo(() => groupVideos(videos, { sort, order }), [videos, sort, order]);
@@ -205,26 +227,48 @@ export function LibraryPage() {
     }
   };
 
+  const isScanActive = (status: ScanStatus | null): boolean =>
+    status?.status === "running" || status?.status === "cancelling";
+
+  const buildVideoQuery = () => {
+    const q = search.trim() || undefined;
+    const compatibility_status = playbackFilter !== "all" ? playbackFilter : undefined;
+    return {
+      q,
+      compatibility_status,
+      media_status: mediaStatusFilter,
+      probe_status: probeStatusFilter,
+      thumbnail_status: thumbnailStatusFilter,
+      extension: extensionFilter,
+      has_probe_error: hasProbeErrorFilter,
+      has_thumbnail: hasThumbnailFilter,
+      sort,
+      order,
+    };
+  };
+
+  const refreshLibraryListsDuringScan = async () => {
+    if (liveRefreshInFlightRef.current) return;
+    liveRefreshInFlightRef.current = true;
+    try {
+      const [nextVideos, nextFolderVideos] = await Promise.all([
+        fetchVideos(buildVideoQuery()),
+        fetchVideos({ sort, order }),
+      ]);
+      setVideos(nextVideos);
+      setFolderVideos(nextFolderVideos);
+    } catch {
+      // keep existing rendered data; scan status polling continues separately
+    } finally {
+      liveRefreshInFlightRef.current = false;
+    }
+  };
+
   const loadVideos = async () => {
     try {
       setLoading(true);
       setError(null);
-      const q = search.trim() || undefined;
-      const compatibility_status = playbackFilter !== "all" ? playbackFilter : undefined;
-      setVideos(
-        await fetchVideos({
-          q,
-          compatibility_status,
-          media_status: mediaStatusFilter,
-          probe_status: probeStatusFilter,
-          thumbnail_status: thumbnailStatusFilter,
-          extension: extensionFilter,
-          has_probe_error: hasProbeErrorFilter,
-          has_thumbnail: hasThumbnailFilter,
-          sort,
-          order,
-        })
-      );
+      setVideos(await fetchVideos(buildVideoQuery()));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load videos");
     } finally {
@@ -311,13 +355,44 @@ export function LibraryPage() {
     }
   };
 
+  const loadHlsState = async () => {
+    try {
+      const status = await getHlsGlobalStatus();
+      setHlsGlobal(status);
+      if (status.active_batch_id) {
+        const batch = await getHlsBatch(status.active_batch_id, { include_items: false });
+        setActiveHlsBatch(batch);
+      } else {
+        setActiveHlsBatch(null);
+      }
+    } catch {
+      // non-critical
+    }
+  };
+
+  const loadHlsDiagnostics = async () => {
+    try {
+      const payload = await getHlsDiagnostics({ details: false });
+      setHlsDiagnostics(payload);
+    } catch {
+      // non-critical
+    }
+  };
+
   const startLibraryPolling = () => {
     if (libraryPollRef.current) return;
     libraryPollRef.current = setInterval(async () => {
       try {
         const status = await getScanStatus();
         setScanStatus(status);
-        if (status.status !== "running") {
+
+        if (isScanActive(status)) {
+          const now = Date.now();
+          if (now - lastLiveRefreshAtRef.current >= 6000) {
+            lastLiveRefreshAtRef.current = now;
+            await refreshLibraryListsDuringScan();
+          }
+        } else {
           stopLibraryPolling();
           if (status.status === "completed") {
               await Promise.all([
@@ -373,14 +448,30 @@ export function LibraryPage() {
     void loadLibrarySummary();
     void loadDiagnosticsSections();
     void loadMediaProfilesData();
+    void loadHlsState();
+    void loadHlsDiagnostics();
     getScanStatus()
       .then((status) => {
         setScanStatus(status);
-        if (status.status === "running") startLibraryPolling();
+        if (isScanActive(status)) {
+          void refreshLibraryListsDuringScan();
+          startLibraryPolling();
+        }
       })
       .catch(() => {});
     return () => stopLibraryPolling();
   }, []);
+
+  useEffect(() => {
+    if (!activeHlsBatch) return;
+    if (!["queued", "running"].includes(activeHlsBatch.status)) return;
+
+    const timer = setInterval(() => {
+      void loadHlsState();
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [activeHlsBatch?.id, activeHlsBatch?.status]);
 
   useEffect(() => {
     void loadFolderVideos();
@@ -393,7 +484,7 @@ export function LibraryPage() {
 
   useEffect(() => {
     if (tab === "diagnostics") {
-      void Promise.all([loadLibrarySummary(), loadDiagnosticsSections(), loadMediaProfilesData()]);
+      void Promise.all([loadLibrarySummary(), loadDiagnosticsSections(), loadMediaProfilesData(), loadHlsDiagnostics()]);
     }
   }, [tab]);
 
@@ -503,14 +594,39 @@ export function LibraryPage() {
   };
 
   const onScanClick = async () => {
+    if (isScanActive(scanStatus)) {
+      setError("Library scan is already running.");
+      return;
+    }
+
     try {
       setError(null);
       await runScan();
       const status = await getScanStatus();
       setScanStatus(status);
-      if (status.status === "running") startLibraryPolling();
+      if (isScanActive(status)) {
+        await refreshLibraryListsDuringScan();
+        startLibraryPolling();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scan failed");
+    }
+  };
+
+  const onCancelScanClick = async () => {
+    const confirmed = window.confirm(
+      "Cancel library scan?\n\nThe current scan will stop after the current file. No original files will be modified. Missing-file cleanup will not run for a cancelled scan."
+    );
+    if (!confirmed) return;
+
+    try {
+      setError(null);
+      const response = await cancelScan();
+      if (response.status === "cancelling") {
+        setScanStatus(await getScanStatus());
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to cancel scan");
     }
   };
 
@@ -577,26 +693,120 @@ export function LibraryPage() {
     }
   };
 
+  const onStartLibraryHlsBatch = async () => {
+    try {
+      setHlsBatchBusy(true);
+      setError(null);
+      setHlsMaintenanceMessage(null);
+      const result = await createLibraryHlsBatch({
+        qualities: ["480p", "720p", "1080p"],
+        skip_existing: hlsForceRegenerate ? false : hlsSkipExisting,
+        force: hlsForceRegenerate,
+        only_missing_hls: true,
+      });
+      setShowHlsLibraryConfirm(false);
+      setError(result.status === "nothing_to_do" ? result.message : null);
+      await Promise.all([loadHlsState(), loadHlsDiagnostics()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start library HLS batch");
+    } finally {
+      setHlsBatchBusy(false);
+    }
+  };
+
+  const onCancelLibraryHlsBatch = async () => {
+    if (!activeHlsBatch) return;
+    const ok = window.confirm("Stop active HLS batch? Current file may finish, queued files will be cancelled.");
+    if (!ok) return;
+
+    try {
+      setHlsCancelBusy(true);
+      setError(null);
+      await cancelHlsBatch(activeHlsBatch.id);
+      await Promise.all([loadHlsState(), loadHlsDiagnostics()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to cancel HLS batch");
+    } finally {
+      setHlsCancelBusy(false);
+    }
+  };
+
+  const onRepairStaleHls = async () => {
+    const ok = window.confirm("Run HLS diagnostics repair now? This only resets stale DB flags where HLS files are missing.");
+    if (!ok) return;
+
+    try {
+      setHlsRepairBusy(true);
+      setError(null);
+      const result = await repairStaleHls();
+      setHlsMaintenanceMessage(
+        `Repair complete: checked ${result.checked}, valid ${result.valid_hls}, missing ${result.missing_hls}, ` +
+        `repaired ${result.db_repaired_to_completed}, invalidated ${result.stale_completed_invalidated}.`
+      );
+      await Promise.all([loadHlsState(), loadHlsDiagnostics()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to repair stale HLS flags");
+    } finally {
+      setHlsRepairBusy(false);
+    }
+  };
+
   return (
     <div className="page">
       <div className="library-sticky-shell">
         <header className="page-header page-header-actions">
           <h1>NAS Video Player</h1>
           <div className="header-actions">
-            <button onClick={onScanClick} disabled={scanStatus?.status === "running"}>
-              {scanStatus?.status === "running" ? "Scanning…" : "Scan Library"}
+            <button onClick={onScanClick}>
+              {scanStatus?.status === "running" || scanStatus?.status === "cancelling" ? "Scanning…" : "Scan Library"}
             </button>
+            {(scanStatus?.status === "running" || scanStatus?.status === "cancelling") && (
+              <button className="btn-secondary" onClick={onCancelScanClick}>
+                Cancel scan
+              </button>
+            )}
             <div className="duplicate-actions">
               <button onClick={onDuplicateScanClick} disabled={duplicateStatus?.status === "running"}>
                 {duplicateStatus?.status === "running" ? "Scanning duplicates…" : "Scan Duplicates"}
+              </button>
+              <button onClick={() => setShowHlsLibraryConfirm(true)} disabled={hlsBatchBusy}>
+                {hlsBatchBusy ? "Starting HLS batch..." : "Prepare HLS for all missing"}
+              </button>
+              <button onClick={onRepairStaleHls} disabled={hlsRepairBusy}>
+                {hlsRepairBusy ? "Repairing HLS flags..." : "Repair stale HLS flags"}
               </button>
             </div>
           </div>
         </header>
 
         <ScanStatusBar status={scanStatus} />
+        {isScanActive(scanStatus) && <div className="library-updating-badge">Library is updating...</div>}
         {error && <div className="error">{error}</div>}
+        {hlsMaintenanceMessage && <div className="notice">{hlsMaintenanceMessage}</div>}
         {duplicateError && <div className="error">{duplicateError}</div>}
+        {activeHlsBatch && (
+          <div className="notice">
+            <strong>Overnight HLS batch #{activeHlsBatch.id}</strong>
+            {" - "}{activeHlsBatch.status}
+            {" - "}{Math.round(activeHlsBatch.progress_percent)}%
+            {" - completed "}{activeHlsBatch.completed_count}/{activeHlsBatch.total_count}
+            {", queued "}{activeHlsBatch.queued_count}
+            {", failed "}{activeHlsBatch.failed_count}
+            {", skipped "}{activeHlsBatch.skipped_count}
+            {hlsGlobal ? `, running jobs ${hlsGlobal.running}/${hlsGlobal.max_concurrent}, queued jobs ${hlsGlobal.queued_jobs}` : ""}
+            {activeHlsBatch.current_video ? ` - current: ${activeHlsBatch.current_video.title}` : ""}
+            {["queued", "running"].includes(activeHlsBatch.status) && (
+              <button
+                className="btn-danger"
+                style={{ marginLeft: 8 }}
+                onClick={onCancelLibraryHlsBatch}
+                disabled={hlsCancelBusy}
+              >
+                {hlsCancelBusy ? "Stopping..." : "Stop HLS batch"}
+              </button>
+            )}
+          </div>
+        )}
 
         <nav className="lib-tabs">
           <button className={tab === "all" ? "tab-btn active" : "tab-btn"} onClick={handleShowAll}>
@@ -824,6 +1034,41 @@ export function LibraryPage() {
 
           <section className="diagnostics-section">
             <div className="diagnostics-section-header">
+              <h3>HLS State</h3>
+              <button className="btn-secondary" onClick={onRepairStaleHls} disabled={hlsRepairBusy}>
+                {hlsRepairBusy ? "Repairing..." : "Repair HLS state"}
+              </button>
+            </div>
+            <div className="diagnostics-summary-grid">
+              <button className="diagnostics-card" type="button">
+                <strong>Valid HLS</strong>
+                <span>{hlsDiagnostics?.valid_hls ?? 0}</span>
+              </button>
+              <button className="diagnostics-card" type="button">
+                <strong>Missing HLS</strong>
+                <span>{hlsDiagnostics?.missing_hls ?? 0}</span>
+              </button>
+              <button className="diagnostics-card" type="button">
+                <strong>Stale completed</strong>
+                <span>{hlsDiagnostics?.db_completed_but_files_missing ?? 0}</span>
+              </button>
+              <button className="diagnostics-card" type="button">
+                <strong>Stale queued</strong>
+                <span>{hlsDiagnostics?.stale_queued ?? 0}</span>
+              </button>
+              <button className="diagnostics-card" type="button">
+                <strong>Stale running</strong>
+                <span>{hlsDiagnostics?.stale_running ?? 0}</span>
+              </button>
+              <button className="diagnostics-card" type="button">
+                <strong>Source missing</strong>
+                <span>{hlsDiagnostics?.invalid_source_missing ?? 0}</span>
+              </button>
+            </div>
+          </section>
+
+          <section className="diagnostics-section">
+            <div className="diagnostics-section-header">
               <h3>Unique Media Profiles</h3>
               <span className="diagnostics-hint">Auto guess + manual calibration matrix</span>
             </div>
@@ -1023,6 +1268,12 @@ export function LibraryPage() {
             </div>
           )}
 
+          {duplicateSummary?.is_outdated && duplicateStatus?.status !== "running" && (
+            <div className="notice notice-warning">
+              ⚠ Duplicate results may be outdated — the library was scanned since the last duplicate scan. Click <strong>Scan Duplicates</strong> to refresh.
+            </div>
+          )}
+
           {duplicateStatus?.errors && duplicateStatus.errors.length > 0 && (
             <div className="error">{duplicateStatus.errors.join(" | ")}</div>
           )}
@@ -1033,8 +1284,10 @@ export function LibraryPage() {
             <div className="status">
               Duplicate scan has not been run yet. Click Scan Duplicates to find possible duplicate videos.
             </div>
-          ) : duplicateSummary && duplicateSummary.last_scan_status !== "idle" && duplicateGroups.length === 0 ? (
+          ) : duplicateSummary && !["idle", "outdated"].includes(duplicateSummary.last_scan_status) && duplicateGroups.length === 0 ? (
             <div className="status">No duplicate candidates found.</div>
+          ) : duplicateSummary?.last_scan_status === "outdated" && duplicateGroups.length === 0 ? (
+            <div className="status">No duplicate candidates from previous scan. Results may be outdated.</div>
           ) : (
             <div className="duplicate-groups">
               {duplicateGroups.map((group, index) => (
@@ -1154,6 +1407,54 @@ export function LibraryPage() {
                 {deletingVideoId === -1
                   ? `Deleting ${bulkDeleteProgress?.done ?? 0}/${bulkDeleteProgress?.total ?? 0}...`
                   : "Yes, delete files"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHlsLibraryConfirm && (
+        <div className="modal-backdrop" onClick={() => (hlsBatchBusy ? null : setShowHlsLibraryConfirm(false))}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <h3>Prepare HLS for all missing videos?</h3>
+            <p>
+              This will enqueue HLS generation for all indexed videos without completed HLS.
+              Existing HLS can be skipped by default.
+            </p>
+            <p>
+              This may take many hours on Synology DS923+. Only one HLS job runs at a time by default.
+              Original files will not be modified.
+            </p>
+            <label className="checkbox-inline" style={{ display: "block", marginBottom: 8 }}>
+              <input
+                type="checkbox"
+                checked={hlsSkipExisting}
+                onChange={(event) => setHlsSkipExisting(event.target.checked)}
+                disabled={hlsBatchBusy || hlsForceRegenerate}
+              />
+              Skip videos with existing HLS
+            </label>
+            <label className="checkbox-inline" style={{ display: "block", marginBottom: 8 }}>
+              <input
+                type="checkbox"
+                checked={hlsForceRegenerate}
+                onChange={(event) => {
+                  const force = event.target.checked;
+                  setHlsForceRegenerate(force);
+                  if (force) {
+                    setHlsSkipExisting(false);
+                  }
+                }}
+                disabled={hlsBatchBusy}
+              />
+              Force regenerate existing HLS (slower)
+            </label>
+            <div className="modal-actions" style={{ marginTop: 12 }}>
+              <button className="btn-secondary" onClick={() => setShowHlsLibraryConfirm(false)} disabled={hlsBatchBusy}>
+                Cancel
+              </button>
+              <button className="btn-primary" onClick={onStartLibraryHlsBatch} disabled={hlsBatchBusy}>
+                {hlsBatchBusy ? "Starting..." : "Start"}
               </button>
             </div>
           </div>
