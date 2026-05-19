@@ -12,6 +12,7 @@ from app.database import get_db
 from app.media_probe import probe_video
 from app.models import MediaProfile, Video, WatchProgress
 from app.schemas import VideoDetail, VideoListItem
+from app.services.library_root_service import resolve_video_source_path
 from app.services.media_profile_service import (
     assign_profile_to_video,
     build_media_profile_fields,
@@ -20,7 +21,7 @@ from app.services.media_profile_service import (
 )
 from app.streaming import RangeError, iter_file_chunks, parse_range_header
 from app.thumbnails import generate_thumbnail
-from app.utils.files import guess_mime_type, safe_resolve_under_root
+from app.utils.files import guess_mime_type
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/videos", tags=["videos"])
@@ -199,10 +200,7 @@ def reprobe_video(
     settings: Settings = Depends(get_settings),
 ) -> VideoDetail:
     video = get_video_or_404(db, video_id)
-    try:
-        video_path = safe_resolve_under_root(settings.video_library_path, video.relative_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Video file not found") from exc
+    video_path = resolve_video_source_path(video, settings)
 
     if not video_path.exists() or not video_path.is_file():
         raise HTTPException(status_code=404, detail="Video file not found")
@@ -318,10 +316,7 @@ def regenerate_video_thumbnail(
     settings: Settings = Depends(get_settings),
 ) -> VideoDetail:
     video = get_video_or_404(db, video_id)
-    try:
-        video_path = safe_resolve_under_root(settings.video_library_path, video.relative_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Video file not found") from exc
+    video_path = resolve_video_source_path(video, settings)
 
     if not video_path.exists() or not video_path.is_file():
         raise HTTPException(status_code=404, detail="Video file not found")
@@ -365,11 +360,7 @@ def download_video(
 ) -> FileResponse:
     """Download the original video file."""
     video = get_video_or_404(db, video_id)
-    try:
-        video_path = safe_resolve_under_root(settings.video_library_path, video.relative_path)
-    except ValueError as exc:
-        logger.warning("Path validation failed for download video id=%s: %s", video_id, exc)
-        raise HTTPException(status_code=404, detail="Video file not found") from exc
+    video_path = resolve_video_source_path(video, settings)
 
     if not video_path.exists() or not video_path.is_file():
         raise HTTPException(status_code=404, detail="Video file not found")
@@ -388,11 +379,7 @@ def delete_video(
     video = get_video_or_404(db, video_id)
 
     if delete_file:
-        try:
-            video_path = safe_resolve_under_root(settings.video_library_path, video.relative_path)
-        except ValueError as exc:
-            logger.warning("Path validation failed for delete video id=%s: %s", video_id, exc)
-            raise HTTPException(status_code=404, detail="Video file not found") from exc
+        video_path = resolve_video_source_path(video, settings)
 
         if video_path.exists() and video_path.is_file():
             try:
@@ -419,11 +406,10 @@ def stream_video(
     settings: Settings = Depends(get_settings),
 ) -> StreamingResponse:
     video = get_video_or_404(db, video_id)
-    try:
-        video_path = safe_resolve_under_root(settings.video_library_path, video.relative_path)
-    except ValueError as exc:
-        logger.warning("Path validation failed for video id=%s: %s", video_id, exc)
-        raise HTTPException(status_code=404, detail="Video file not found") from exc
+    video_path = resolve_video_source_path(video, settings)
+
+    if not video_path.exists() or not video_path.is_file():
+        raise HTTPException(status_code=404, detail="Video file not found")
 
     file_size = video_path.stat().st_size
     range_header = request.headers.get("range")

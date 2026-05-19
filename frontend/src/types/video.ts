@@ -109,6 +109,9 @@ export type ScanStatus = {
   removed_missing: number;
   errors: string[];
   current_file: string | null;
+  current_root: string | null;
+  roots_scanned: number;
+  total_roots: number;
   message: string | null;
 };
 
@@ -401,3 +404,38 @@ export type PlaybackSource = {
   reason: string;
 };
 
+// ── Library Root / Media Source types ─────────────────────────────────────
+
+export type LibraryRoot = {
+  id: number;
+  name: string;
+  path: string;
+  media_type: string;
+  enabled: boolean;
+  recursive: boolean;
+  scan_priority: number;
+  last_scanned_at: string | null;
+  last_scan_status: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+  video_count: number;
+};
+
+export type LibraryRootIn = {
+  name: string;
+  path: string;
+  media_type?: string;
+  enabled?: boolean;
+  recursive?: boolean;
+  scan_priority?: number;
+};
+
+export type LibraryRootUpdate = Partial<LibraryRootIn>;
+
+export type PathValidationResult = {
+  valid: boolean;
+  path?: string;
+  code?: string;
+  message: string;
+};

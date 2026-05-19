@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.media_probe import probe_video
-from app.models import Video, WatchProgress
+from app.models import LibraryRoot, Video, WatchProgress
 from app.scan_status import (
     cancel_scan,
     fail_scan,
@@ -17,7 +17,10 @@ from app.scan_status import (
     mark_scan_interrupted,
     start_scan,
     update_current_file,
+    update_current_root,
+    update_roots_info,
 )
+from app.services.library_root_service import bootstrap_library_roots, get_enabled_library_roots
 from app.services.media_profile_service import (
     assign_profile_to_video,
     build_media_profile_fields,
@@ -44,13 +47,17 @@ class ScanResult:
     added: int = 0
     updated: int = 0
     removed_missing: int = 0
+    roots_scanned: int = 0
+    total_roots: int = 0
     cancelled: bool = False
     message: str | None = None
     errors: list[str] = field(default_factory=list)
 
 
-def iter_library_files(root: Path) -> list[Path]:
-    return [path for path in root.rglob("*") if path.is_file()]
+def iter_library_files(root: Path, recursive: bool = True) -> list[Path]:
+    if recursive:
+        return [path for path in root.rglob("*") if path.is_file()]
+    return [path for path in root.iterdir() if path.is_file()]
 
 
 def _is_hidden_or_system(path: Path) -> bool:
@@ -91,6 +98,7 @@ def _upsert_video_record(
     root: Path,
     folder_path: str,
     *,
+    library_root_id: int | None = None,
     stat_size: int,
     stat_mtime: float,
     duration: float | None,
@@ -146,15 +154,17 @@ def _upsert_video_record(
                 folder_path=folder_path,
                 compatibility_status=compatibility_status,
                 compatibility_reason=compatibility_reason,
+                library_root_id=library_root_id,
                 indexed_at=now,
             )
         )
         db.flush()
-        created_video = db.query(Video).filter(Video.relative_path == relative_path).first()
+        created_video = db.query(Video).filter(Video.absolute_path == str(file_path)).first()
         return True, False, created_video
 
     existing.title = file_path.stem
     existing.filename = file_path.name
+    existing.relative_path = relative_path
     existing.absolute_path = str(file_path)
     existing.extension = file_path.suffix.lower()
     existing.size = stat_size
@@ -179,6 +189,7 @@ def _upsert_video_record(
     existing.folder_path = folder_path
     existing.compatibility_status = compatibility_status
     existing.compatibility_reason = compatibility_reason
+    existing.library_root_id = library_root_id
     existing.indexed_at = now
     return False, True, existing
 
@@ -190,33 +201,43 @@ def _compute_folder_path(file_path: Path, root: Path) -> str:
     return "" if folder == "." else folder
 
 
-def scan_video_library(db: Session, settings: Settings) -> ScanResult:
-    result = ScanResult()
-    root = settings.video_library_path
-    logger.info("Scan started for %s", root)
+def initialize_library_roots(db: Session, settings: Settings) -> None:
+    """Ensure library_roots has at least one entry. Called at application startup."""
+    if db.query(LibraryRoot).count() > 0:
+        return
+    logger.info("No library roots found at startup – initialising defaults from environment.")
+    bootstrap_library_roots(db, settings)
 
-    if not root.exists() or not root.is_dir():
-        msg = f"Video library path does not exist: {root}"
-        logger.error(msg)
-        result.errors.append(msg)
-        return result
 
-    # ── Step 1: index new / changed files ───────────────────────────────────
-    files = iter_library_files(root)
-    logger.info("Found %d candidate files", len(files))
+def _create_roots_from_config(db: Session, settings: Settings) -> list[LibraryRoot]:
+    """Backward-compatible wrapper around the shared library root bootstrap logic."""
+    return bootstrap_library_roots(db, settings)
 
-    def _cancel_now() -> ScanResult:
-        result.cancelled = True
-        result.message = "Library scan was cancelled by user."
-        db.commit()
-        return result
 
-    if is_cancellation_requested():
-        return _cancel_now()
+# ── Per-root file scan ─────────────────────────────────────────────────────
+
+
+def _scan_root_files(
+    db: Session,
+    settings: Settings,
+    root: Path,
+    library_root_id: int | None,
+    result: ScanResult,
+    recursive: bool = True,
+) -> bool:
+    """
+    Scan all files under ``root`` and update ``result`` in place.
+    Returns True if the scan was cancelled during this root.
+    """
+    files = iter_library_files(root, recursive=recursive)
+    logger.info("Root %s: found %d candidate files", root, len(files))
 
     for file_path in files:
         if is_cancellation_requested():
-            return _cancel_now()
+            result.cancelled = True
+            result.message = "Library scan was cancelled by user."
+            db.commit()
+            return True
 
         result.scanned_files += 1
         increment_progress(scanned_files_inc=1)
@@ -240,19 +261,36 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                 increment_progress(ignored_non_media_inc=1)
                 continue
 
-            existing = db.query(Video).filter(Video.relative_path == relative_path).first()
+            # Prefer absolute_path for direct matches, then fall back to
+            # per-root relative key to align with uq_videos_root_relative_path.
+            existing = db.query(Video).filter(Video.absolute_path == str(file_path)).first()
+            if existing is None and library_root_id is not None:
+                existing = (
+                    db.query(Video)
+                    .filter(
+                        Video.library_root_id == library_root_id,
+                        Video.relative_path == relative_path,
+                    )
+                    .first()
+                )
             unchanged = (
                 existing is not None
                 and existing.size == stat.st_size
                 and abs(existing.modified_ts - stat.st_mtime) < 1e-6
             )
             if unchanged:
+                # Update library_root_id for files migrating from single-root
+                if existing.library_root_id != library_root_id:
+                    existing.library_root_id = library_root_id
                 if is_cancellation_requested():
-                    return _cancel_now()
+                    result.cancelled = True
+                    result.message = "Library scan was cancelled by user."
+                    db.commit()
+                    return True
                 if existing is not None and existing.media_status == "detected_video":
                     if reconcile_hls_variants_for_video(db, settings, existing.id):
                         logger.warning(
-                            "Reset stale HLS DB state for video_id=%s relative_path=%s because files are missing",
+                            "Reset stale HLS DB state for video_id=%s relative_path=%s",
                             existing.id,
                             existing.relative_path,
                         )
@@ -289,7 +327,10 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
             logger.info("Indexing file: %s", relative_path)
             probe = probe_video(file_path)
             if is_cancellation_requested():
-                return _cancel_now()
+                result.cancelled = True
+                result.message = "Library scan was cancelled by user."
+                db.commit()
+                return True
             if not probe.success:
                 result.probe_failed += 1
                 increment_progress(probe_failed_inc=1)
@@ -316,6 +357,7 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                         file_path,
                         root,
                         folder_path,
+                        library_root_id=library_root_id,
                         stat_size=stat.st_size,
                         stat_mtime=stat.st_mtime,
                         duration=None,
@@ -377,7 +419,10 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
             thumbnail_status = "pending"
             thumbnail_error: str | None = None
             if is_cancellation_requested():
-                return _cancel_now()
+                result.cancelled = True
+                result.message = "Library scan was cancelled by user."
+                db.commit()
+                return True
             try:
                 thumb_path = ensure_thumbnail(file_path, settings.thumbnails_path, relative_path)
                 thumb_relative = thumb_path.name if thumb_path else None
@@ -401,6 +446,7 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                 file_path,
                 root,
                 folder_path,
+                library_root_id=library_root_id,
                 stat_size=stat.st_size,
                 stat_mtime=stat.st_mtime,
                 duration=probe.duration,
@@ -430,7 +476,7 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
                 if saved_video.media_status == "detected_video":
                     if reconcile_hls_variants_for_video(db, settings, saved_video.id):
                         logger.warning(
-                            "Reset stale HLS DB state for video_id=%s relative_path=%s because files are missing",
+                            "Reset stale HLS DB state for video_id=%s relative_path=%s",
                             saved_video.id,
                             saved_video.relative_path,
                         )
@@ -448,31 +494,137 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
             result.errors.append(error_msg)
             increment_progress(error=error_msg)
         finally:
-            # Commit each file iteration so /api/videos can reflect new rows while scan is still running.
             db.commit()
 
-    if is_cancellation_requested():
-        return _cancel_now()
+    return False  # Not cancelled
 
-    # ── Step 2: remove DB records whose source file no longer exists ────────
-    all_db_videos = db.query(Video).all()
-    for db_video in all_db_videos:
+
+# ── Missing-file cleanup ───────────────────────────────────────────────────
+
+
+def _cleanup_missing_videos(
+    db: Session,
+    settings: Settings,
+    scanned_root_ids: set[int],
+    root_map: dict[int, Path],
+) -> int:
+    """
+    Remove Video records whose source files no longer exist on disk.
+    Only handles videos from roots that were actually scanned in this run.
+    """
+    removed = 0
+    all_videos = db.query(Video).all()
+
+    for video in all_videos:
         if is_cancellation_requested():
-            return _cancel_now()
+            break
         try:
-            disk_path = root / db_video.relative_path
+            if video.library_root_id is not None:
+                if video.library_root_id not in scanned_root_ids:
+                    # From a disabled/unscanned root – leave it untouched
+                    continue
+                root_path = root_map[video.library_root_id]
+                disk_path = root_path / video.relative_path
+            else:
+                # Legacy video without a root – check against VIDEO_LIBRARY_PATH
+                disk_path = settings.video_library_path / video.relative_path
+
             if not disk_path.exists() or not disk_path.is_file():
-                logger.info("Source file missing, removing from index: %s", db_video.relative_path)
-                db.query(WatchProgress).filter(WatchProgress.video_id == db_video.id).delete()
-                db.delete(db_video)
-                result.removed_missing += 1
+                logger.info("Source file missing, removing from index: %s", video.relative_path)
+                db.query(WatchProgress).filter(WatchProgress.video_id == video.id).delete()
+                db.delete(video)
+                removed += 1
                 increment_progress(removed_missing_inc=1)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Error checking file for removal %s: %s", db_video.relative_path, exc)
+            logger.warning("Error checking file for removal %s: %s", video.relative_path, exc)
+
+    if removed:
+        db.commit()
+    return removed
+
+
+# ── Main scan orchestrator ─────────────────────────────────────────────────
+
+
+def scan_video_library(db: Session, settings: Settings) -> ScanResult:
+    """Scan all enabled library roots and return aggregated results."""
+    result = ScanResult()
+
+    enabled_roots = get_enabled_library_roots(db, settings)
+    result.total_roots = len(enabled_roots)
+
+    if not enabled_roots:
+        logger.info("No enabled library roots found. Nothing to scan.")
+        result.message = "No enabled library roots configured."
+        return result
+
+    logger.info("Scan started for %d enabled root(s)", len(enabled_roots))
+    update_roots_info(len(enabled_roots))
+
+    if is_cancellation_requested():
+        result.cancelled = True
+        result.message = "Library scan was cancelled by user."
+        return result
+
+    scanned_root_ids: set[int] = set()
+    root_map: dict[int, Path] = {}
+
+    for root_record in enabled_roots:
+        if is_cancellation_requested():
+            result.cancelled = True
+            result.message = "Library scan was cancelled by user."
+            db.commit()
+            return result
+
+        root_path = Path(root_record.path)
+        update_current_root(root_record.path)
+
+        if not root_path.exists() or not root_path.is_dir():
+            msg = f"Library root does not exist or is not a directory: {root_path}"
+            logger.error(msg)
+            result.errors.append(msg)
+            root_record.last_scan_status = "error"
+            root_record.last_error = msg
+            db.commit()
+            continue
+
+        logger.info("Scanning root: %s (id=%s, recursive=%s)", root_path, root_record.id, root_record.recursive)
+        cancelled = _scan_root_files(
+            db, settings, root_path, root_record.id, result, recursive=root_record.recursive
+        )
+
+        if cancelled:
+            root_record.last_scan_status = "cancelled"
+            db.commit()
+            return result
+
+        root_record.last_scanned_at = datetime.now(timezone.utc)
+        root_record.last_scan_status = "completed"
+        root_record.last_error = None
+        db.commit()
+
+        result.roots_scanned += 1
+        increment_progress(roots_scanned_inc=1)
+        scanned_root_ids.add(root_record.id)
+        root_map[root_record.id] = root_path
+
+    if is_cancellation_requested():
+        result.cancelled = True
+        result.message = "Library scan was cancelled by user."
+        db.commit()
+        return result
+
+    update_current_root(None)
+
+    # Remove DB records whose source files no longer exist
+    removed = _cleanup_missing_videos(db, settings, scanned_root_ids, root_map)
+    result.removed_missing = removed
 
     db.commit()
     logger.info(
-        "Scan completed scanned_files=%d detected_videos=%d unchanged=%d added=%d updated=%d removed_missing=%d errors=%d",
+        "Scan completed roots=%d scanned=%d detected=%d unchanged=%d"
+        " added=%d updated=%d removed=%d errors=%d",
+        result.roots_scanned,
         result.scanned_files,
         result.detected_videos,
         result.existing_unchanged,
@@ -507,6 +659,8 @@ def scan_video_library_background(settings: Settings) -> None:
                 existing_unchanged=result.existing_unchanged,
                 removed_missing=result.removed_missing,
                 errors=result.errors,
+                roots_scanned=result.roots_scanned,
+                total_roots=result.total_roots,
                 message=result.message or "Library scan was cancelled by user.",
             )
         else:
@@ -523,11 +677,10 @@ def scan_video_library_background(settings: Settings) -> None:
                 existing_unchanged=result.existing_unchanged,
                 removed_missing=result.removed_missing,
                 errors=result.errors,
+                roots_scanned=result.roots_scanned,
+                total_roots=result.total_roots,
                 message=result.message,
             )
-            # After a successful library scan (even with errors/unchanged), mark
-            # any stored duplicate results as outdated so the user knows to re-run
-            # duplicate detection.
             try:
                 mark_duplicates_outdated(db)
             except Exception as exc:  # noqa: BLE001

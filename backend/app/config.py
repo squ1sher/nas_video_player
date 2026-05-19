@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    video_library_path: Path = Field(default=Path("/media/videos"), validation_alias="VIDEO_LIBRARY_PATH")
+    video_library_path: Path = Field(default=Path("/media/library"), validation_alias="VIDEO_LIBRARY_PATH")
     database_path: Path = Field(default=Path("/app/data/app.db"), validation_alias="DATABASE_PATH")
     thumbnails_path: Path = Field(default=Path("/app/thumbnails"), validation_alias="THUMBNAILS_PATH")
     cache_path: Path = Field(default=Path("/app/cache"), validation_alias="CACHE_PATH")
@@ -24,7 +24,12 @@ class Settings(BaseSettings):
     )
     excluded_extensions: str = Field(
         default=(
-            ".txt,.nfo,.srt,.ass,.ssa,.jpg,.jpeg,.png,.webp,.gif,.db,.sqlite,.json,.xml,.log,.tmp,.part,.crdownload,.ds_store"
+            ".mp3,.flac,.wav,.m4a,.aac,.ogg,.wma,.opus"
+            ",.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.bmp,.tiff,.avif,.svg"
+            ",.txt,.nfo,.srt,.ass,.ssa,.sub,.idx,.vtt"
+            ",.db,.sqlite,.json,.xml,.log,.tmp,.part,.crdownload,.ds_store"
+            ",.zip,.rar,.7z,.tar,.gz"
+            ",.pdf,.doc,.docx,.xls,.xlsx,.exe,.sh"
         ),
         validation_alias="EXCLUDED_EXTENSIONS",
     )
@@ -34,6 +39,21 @@ class Settings(BaseSettings):
     hls_segment_seconds: int = Field(default=4, validation_alias="HLS_SEGMENT_SECONDS")
     hls_ffmpeg_preset: str = Field(default="veryfast", validation_alias="HLS_FFMPEG_PRESET")
     hls_crf: int = Field(default=23, validation_alias="HLS_CRF")
+
+    # ── Multi-root / library sources settings ────────────────────────────────
+    # Comma-separated allowed base paths for media sources (security restriction).
+    # If empty (default), any path is accepted. Set this in production for safety.
+    # Example: ALLOWED_MEDIA_ROOT_BASES=/media/library,/media/videos
+    allowed_media_root_bases: str = Field(
+        default="",
+        validation_alias="ALLOWED_MEDIA_ROOT_BASES",
+    )
+    # Comma-separated container paths to initialise as library roots on first run.
+    # Example: /media/library/video,/media/library/gopro,/media/library/family
+    media_library_roots: str = Field(default="", validation_alias="MEDIA_LIBRARY_ROOTS")
+    # JSON alternative (preferred if both are set).
+    # Example: [{"name":"GoPro","path":"/media/library/gopro"},{"name":"Family","path":"/media/library/family"}]
+    media_library_roots_json: str = Field(default="", validation_alias="MEDIA_LIBRARY_ROOTS_JSON")
 
     def ensure_runtime_dirs(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)

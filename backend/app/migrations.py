@@ -53,6 +53,111 @@ def _create_index_if_missing(
             conn.execute(text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({column})"))
 
 
+def _table_sql(engine: Engine, table: str) -> str:
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT sql FROM sqlite_master WHERE type='table' AND name=:n"),
+            {"n": table},
+        ).scalar()
+    return str(result or "")
+
+
+def _videos_table_requires_multi_root_rebuild(engine: Engine) -> bool:
+    sql = " ".join(_table_sql(engine, "videos").lower().split())
+    if not sql:
+        return False
+    if "uq_videos_root_relative_path" in sql or "unique (library_root_id, relative_path)" in sql:
+        return False
+    return "uq_videos_relative_path" in sql or "unique (relative_path)" in sql
+
+
+def _rebuild_videos_table_for_multi_root(engine: Engine) -> None:
+    if not _videos_table_requires_multi_root_rebuild(engine):
+        return
+
+    logger.info("Migration: rebuilding videos table for multi-root relative_path uniqueness")
+    with engine.begin() as conn:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(
+            text(
+                """
+                CREATE TABLE videos__new (
+                    id INTEGER PRIMARY KEY,
+                    library_root_id INTEGER NULL REFERENCES library_roots(id) ON DELETE SET NULL,
+                    title VARCHAR(512) NOT NULL,
+                    filename VARCHAR(512) NOT NULL,
+                    relative_path VARCHAR(1024) NOT NULL,
+                    absolute_path VARCHAR(2048) NOT NULL,
+                    extension VARCHAR(16) NOT NULL,
+                    size INTEGER NOT NULL,
+                    modified_ts FLOAT NOT NULL,
+                    duration FLOAT NULL,
+                    width INTEGER NULL,
+                    height INTEGER NULL,
+                    video_codec VARCHAR(64) NULL,
+                    video_profile VARCHAR(64) NULL,
+                    video_level VARCHAR(32) NULL,
+                    pixel_format VARCHAR(64) NULL,
+                    audio_codec VARCHAR(64) NULL,
+                    audio_channels INTEGER NULL,
+                    audio_sample_rate INTEGER NULL,
+                    thumbnail_path VARCHAR(1024) NULL,
+                    thumbnail_status VARCHAR(32) NULL,
+                    thumbnail_error TEXT NULL,
+                    media_profile_id INTEGER NULL REFERENCES media_profiles(id) ON DELETE SET NULL,
+                    media_profile_key VARCHAR(128) NULL,
+                    media_profile_version VARCHAR(32) NULL,
+                    media_status VARCHAR(64) NULL,
+                    probe_status VARCHAR(32) NULL,
+                    probe_error TEXT NULL,
+                    container_format VARCHAR(128) NULL,
+                    folder_path VARCHAR(1024) NULL,
+                    compatibility_status VARCHAR(32) NULL,
+                    compatibility_reason VARCHAR(512) NULL,
+                    auto_compatibility_status VARCHAR(32) NULL,
+                    auto_compatibility_reason VARCHAR(512) NULL,
+                    effective_compatibility_status VARCHAR(32) NULL,
+                    compatibility_source VARCHAR(64) NULL,
+                    manual_playback_status VARCHAR(32) NULL,
+                    indexed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_videos_root_relative_path UNIQUE (library_root_id, relative_path)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO videos__new (
+                    id, library_root_id, title, filename, relative_path, absolute_path, extension, size, modified_ts,
+                    duration, width, height, video_codec, video_profile, video_level, pixel_format,
+                    audio_codec, audio_channels, audio_sample_rate, thumbnail_path, thumbnail_status,
+                    thumbnail_error, media_profile_id, media_profile_key, media_profile_version,
+                    media_status, probe_status, probe_error, container_format, folder_path,
+                    compatibility_status, compatibility_reason, auto_compatibility_status,
+                    auto_compatibility_reason, effective_compatibility_status, compatibility_source,
+                    manual_playback_status, indexed_at, created_at, updated_at
+                )
+                SELECT
+                    id, library_root_id, title, filename, relative_path, absolute_path, extension, size, modified_ts,
+                    duration, width, height, video_codec, video_profile, video_level, pixel_format,
+                    audio_codec, audio_channels, audio_sample_rate, thumbnail_path, thumbnail_status,
+                    thumbnail_error, media_profile_id, media_profile_key, media_profile_version,
+                    media_status, probe_status, probe_error, container_format, folder_path,
+                    compatibility_status, compatibility_reason, auto_compatibility_status,
+                    auto_compatibility_reason, effective_compatibility_status, compatibility_source,
+                    manual_playback_status, indexed_at, created_at, updated_at
+                FROM videos
+                """
+            )
+        )
+        conn.execute(text("DROP TABLE videos"))
+        conn.execute(text("ALTER TABLE videos__new RENAME TO videos"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+
+
 def run_migrations(engine: Engine) -> None:
     """Apply all pending schema migrations.
 
@@ -332,6 +437,38 @@ def run_migrations(engine: Engine) -> None:
     ]
     for col, col_def in hls_batch_item_migrations:
         _add_column_if_missing(engine, "hls_batch_items", col, col_def)
+
+    # ── library_roots table ───────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS library_roots (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    path VARCHAR(2048) NOT NULL UNIQUE,
+                    media_type VARCHAR(32) NOT NULL DEFAULT 'video',
+                    enabled BOOLEAN NOT NULL DEFAULT 1,
+                    recursive BOOLEAN NOT NULL DEFAULT 1,
+                    scan_priority INTEGER NOT NULL DEFAULT 100,
+                    last_scanned_at DATETIME NULL,
+                    last_scan_status VARCHAR(32) NULL,
+                    last_error TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    _create_index_if_missing(engine, "ix_library_roots_id", "library_roots", "id")
+
+    # ── videos.library_root_id column ────────────────────────────────────────
+    _add_column_if_missing(engine, "videos", "library_root_id", "INTEGER NULL REFERENCES library_roots(id)")
+    _rebuild_videos_table_for_multi_root(engine)
+    _create_index_if_missing(engine, "ix_videos_library_root_id", "videos", "library_root_id")
+    _create_index_if_missing(engine, "ix_videos_relative_path", "videos", "relative_path")
+    _create_index_if_missing(engine, "ix_videos_absolute_path", "videos", "absolute_path")
 
     logger.info("Database migrations applied successfully")
 

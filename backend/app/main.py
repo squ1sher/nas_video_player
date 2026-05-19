@@ -19,8 +19,9 @@ from app.routes.library import router as library_router
 from app.routes.media_profiles import router as media_profiles_router
 from app.routes.progress import router as progress_router
 from app.routes.scan import router as scan_router
+from app.routes.settings import router as settings_router
 from app.routes.videos import router as videos_router
-from app.scanner import recover_scan_runtime_state
+from app.scanner import initialize_library_roots, recover_scan_runtime_state
 from app.services.hls_service import ensure_batch_worker_started, recover_hls_runtime_state
 from app.utils.logging_config import configure_logging
 
@@ -30,10 +31,11 @@ configure_logging(settings.logs_path)
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="NAS Video Player", version="0.2.0")
+app = FastAPI(title="NAS Video Player", version="0.2.5")
 
 app.include_router(health_router)
 app.include_router(scan_router)
+app.include_router(settings_router)
 app.include_router(library_router)
 app.include_router(media_profiles_router)
 # progress_router MUST come before videos_router so /continue-watching
@@ -48,8 +50,14 @@ app.include_router(videos_router)
 
 @app.on_event("startup")
 def on_startup() -> None:
+    import app.database as _db_module
     Base.metadata.create_all(bind=engine)
     run_migrations(engine)
+    db = _db_module.SessionLocal()
+    try:
+        initialize_library_roots(db, settings)
+    finally:
+        db.close()
     recover_scan_runtime_state()
     recover_hls_runtime_state()
     ensure_batch_worker_started()

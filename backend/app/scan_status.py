@@ -25,6 +25,9 @@ class ScanState:
     removed_missing: int = 0
     errors: list[str] = field(default_factory=list)
     current_file: str | None = None
+    current_root: str | None = None
+    roots_scanned: int = 0
+    total_roots: int = 0
     message: str | None = None
 _state = ScanState()
 _lock = threading.Lock()
@@ -50,6 +53,9 @@ def get_scan_state() -> ScanState:
             removed_missing=_state.removed_missing,
             errors=list(_state.errors),
             current_file=_state.current_file,
+            current_root=_state.current_root,
+            roots_scanned=_state.roots_scanned,
+            total_roots=_state.total_roots,
             message=_state.message,
         )
 def start_scan() -> None:
@@ -73,6 +79,9 @@ def start_scan() -> None:
         _state.removed_missing = 0
         _state.errors = []
         _state.current_file = None
+        _state.current_root = None
+        _state.roots_scanned = 0
+        _state.total_roots = 0
         _state.message = None
 
 
@@ -103,6 +112,8 @@ def finish_scan(
     existing_unchanged: int,
     removed_missing: int,
     errors: list[str],
+    roots_scanned: int = 0,
+    total_roots: int = 0,
     message: str | None = None,
 ) -> None:
     """Mark scan as completed with results."""
@@ -124,6 +135,9 @@ def finish_scan(
         _state.removed_missing = removed_missing
         _state.errors = list(errors)
         _state.current_file = None
+        _state.current_root = None
+        _state.roots_scanned = roots_scanned
+        _state.total_roots = total_roots
         _state.message = message
 
 
@@ -141,6 +155,8 @@ def cancel_scan(
     existing_unchanged: int,
     removed_missing: int,
     errors: list[str],
+    roots_scanned: int = 0,
+    total_roots: int = 0,
     message: str = "Library scan was cancelled by user.",
 ) -> None:
     with _lock:
@@ -161,6 +177,9 @@ def cancel_scan(
         _state.removed_missing = removed_missing
         _state.errors = list(errors)
         _state.current_file = None
+        _state.current_root = None
+        _state.roots_scanned = roots_scanned
+        _state.total_roots = total_roots
         _state.message = message
 def fail_scan(error: str) -> None:
     """Mark scan as failed."""
@@ -170,6 +189,7 @@ def fail_scan(error: str) -> None:
         _state.cancellation_requested = False
         _state.errors.append(error)
         _state.current_file = None
+        _state.current_root = None
         _state.message = error
 
 
@@ -181,12 +201,25 @@ def mark_scan_interrupted(message: str = "Library scan was interrupted by applic
         _state.finished_at = datetime.now(timezone.utc)
         _state.cancellation_requested = False
         _state.current_file = None
+        _state.current_root = None
         _state.message = message
         return True
 def update_current_file(path: str) -> None:
     """Update the currently-being-processed file path."""
     with _lock:
         _state.current_file = path
+
+
+def update_current_root(path: str | None) -> None:
+    """Update the currently-being-scanned root path."""
+    with _lock:
+        _state.current_root = path
+
+
+def update_roots_info(total_roots: int) -> None:
+    """Set the total number of roots to be scanned."""
+    with _lock:
+        _state.total_roots = total_roots
 
 
 def increment_progress(
@@ -202,6 +235,7 @@ def increment_progress(
     added_inc: int = 0,
     updated_inc: int = 0,
     removed_missing_inc: int = 0,
+    roots_scanned_inc: int = 0,
     error: str | None = None,
 ) -> None:
     """Update counters in-place while scan is running for live UI updates."""
@@ -219,6 +253,6 @@ def increment_progress(
         _state.added += added_inc
         _state.updated += updated_inc
         _state.removed_missing += removed_missing_inc
+        _state.roots_scanned += roots_scanned_inc
         if error:
             _state.errors.append(error)
-

@@ -5,13 +5,20 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - /volume1/sclad:/media/videos:rw
+      # Mount one broad host folder once; manage subfolders from Settings -> Media Sources.
+      - /volume1/:/media/library:rw
       - /volume1/docker/video-player/data:/app/data
       - /volume1/docker/video-player/thumbnails:/app/thumbnails
       - /volume1/docker/video-player/cache:/app/cache
       - /volume1/docker/video-player/logs:/app/logs
     environment:
-      - VIDEO_LIBRARY_PATH=/media/videos
+      # Broad root path in container.
+      - VIDEO_LIBRARY_PATH=/media/library
+      # Settings UI can only add media sources under these container roots.
+      - ALLOWED_MEDIA_ROOT_BASES=/media/library
+      # Optional first-start bootstrap only. After startup, manage sources via UI.
+      # - MEDIA_LIBRARY_ROOTS=/media/library/Movies,/media/library/GoPro,/media/library/Family
+      # - MEDIA_LIBRARY_ROOTS_JSON=[{"name":"Movies","path":"/media/library/Movies"},{"name":"GoPro","path":"/media/library/GoPro"},{"name":"Family","path":"/media/library/Family"}]
       - DATABASE_PATH=/app/data/app.db
       - THUMBNAILS_PATH=/app/thumbnails
       - CACHE_PATH=/app/cache

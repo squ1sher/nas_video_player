@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { LibraryPage } from "./pages/LibraryPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { WatchPage } from "./pages/WatchPage";
 
 export default function App() {
@@ -7,6 +8,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<LibraryPage />} />
       <Route path="/watch/:id" element={<WatchPage />} />
+      <Route path="/settings" element={<SettingsPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

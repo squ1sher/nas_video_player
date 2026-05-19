@@ -15,6 +15,18 @@ Mini-YouTube style local web video player for Synology NAS.
 
 ## Phase 1.8 Features (current)
 
+### Application Settings and configurable Media Sources
+- New **Settings** page for managing media sources / library roots
+- Mount one broad host folder once (for example `/volume1/sclad -> /media/library`) and manage subfolders from the web UI
+- Each media source stores:
+  - name, path, enabled flag, recursive flag, scan priority
+  - last scan time, last scan status, last error
+- Media source paths are validated against optional `ALLOWED_MEDIA_ROOT_BASES`
+- Backward compatibility: if no media sources exist yet, a default one is created from `VIDEO_LIBRARY_PATH`
+- Indexed videos now store `library_root_id`, so identical relative paths can exist in different sources
+- `MEDIA_LIBRARY_ROOTS` / `MEDIA_LIBRARY_ROOTS_JSON` are **optional bootstrap helpers only** (first startup)
+- After startup, normal management should happen in **Settings -> Media Sources**
+
 ### Watch progress / Resume playback
 - Global (single-user) watch progress saved in SQLite
 - Progress saved every 5 seconds, on pause, and on page close
@@ -136,12 +148,30 @@ Mini-YouTube style local web video player for Synology NAS.
 Create these folders on your NAS before first run:
 
 ```
-/volume1/video_library              ← your video files (read-only)
+/volume1/sclad                      ← broad media root (mounted as /media/library)
 /volume1/docker/video-player/data
 /volume1/docker/video-player/thumbnails
 /volume1/docker/video-player/cache
 /volume1/docker/video-player/logs
 ```
+
+### Recommended Docker mount strategy
+
+Mount broad host roots in `docker-compose.yml`, then create/manage specific media sources in the web UI.
+
+Example:
+
+```yaml
+volumes:
+  - /volume1/sclad:/media/library:rw
+```
+
+Then in **Settings -> Media Sources**, add container paths such as:
+- `/media/library/Movies`
+- `/media/library/GoPro`
+- `/media/library/Family`
+
+Do **not** enter host paths in the app UI (for example `/volume1/sclad/Movies`).
 
 ## Project structure
 
@@ -160,10 +190,13 @@ nas_video_player/
       streaming.py
       compatibility.py     # Browser compatibility detection
       scan_status.py       # In-process scan state tracker
+      services/
+        library_root_service.py
       routes/
         health.py
         videos.py          # List, detail, thumbnail, stream
         scan.py            # POST scan, GET status, GET last-result
+        settings.py        # Media sources / settings endpoints
         progress.py        # Watch progress endpoints
         folders.py         # Folder listing
       utils/
@@ -189,6 +222,7 @@ nas_video_player/
         client.ts
       pages/
         LibraryPage.tsx
+        SettingsPage.tsx
         WatchPage.tsx
       components/
         VideoCard.tsx
@@ -223,7 +257,10 @@ nas_video_player/
 
 | Variable             | Default              | Description                     |
 |----------------------|----------------------|---------------------------------|
-| `VIDEO_LIBRARY_PATH` | `/media/videos`      | Path to video library (mounted) |
+| `VIDEO_LIBRARY_PATH` | `/media/library`      | Broad mounted container root; fallback default source if none configured |
+| `ALLOWED_MEDIA_ROOT_BASES` | `` | Comma-separated allowed container base paths for Settings → Media Sources (recommended: `/media/library`) |
+| `MEDIA_LIBRARY_ROOTS` | `` | Optional bootstrap-only comma-separated media sources for first startup |
+| `MEDIA_LIBRARY_ROOTS_JSON` | `` | Optional bootstrap-only JSON alternative for first startup |
 | `DATABASE_PATH`      | `/app/data/app.db`   | SQLite database file path       |
 | `THUMBNAILS_PATH`    | `/app/thumbnails`    | Thumbnails output directory     |
 | `CACHE_PATH`         | `/app/cache`         | Cache directory                 |
@@ -249,6 +286,18 @@ docker compose up -d --build
 
 Open the app: `http://NAS_IP:8080`
 
+### Host path vs container path (important)
+
+- In `docker-compose.yml`, you map **host path -> container path**.
+- In the web app Settings, always enter the **container path**.
+
+Example:
+- Compose mapping: `/volume1/sclad:/media/library:rw`
+- UI path (correct): `/media/library/Movies`
+- UI path (incorrect): `/volume1/sclad/Movies`
+
+You do not need to edit `docker-compose.yml` for every new media subfolder; add subfolders from Settings instead.
+
 > **Note:** If you are upgrading from Phase 1 (MVP), delete or clear the existing
 > SQLite database (`/volume1/docker/video-player/data/app.db`) before starting.
 > Phase 1.5 adds new columns and a new table which are not auto-migrated.
@@ -256,17 +305,18 @@ Open the app: `http://NAS_IP:8080`
 ## How to use
 
 1. Open `http://NAS_IP:8080`
-2. Click **Scan Library** — scan runs in background; watch the status bar
-3. Browse **All Videos** (newest first by default)
-4. Use **Folders** tab to navigate by directory
-5. Use **Continue Watching** tab to resume in-progress videos
-6. Use **Duplicates** tab to review likely duplicate candidates
-7. Click **Scan Duplicates** to run a separate duplicate scan
-8. Use **Diagnostics** tab to inspect problematic files and quick-filter the library
- 9. In **Folders**, expand folders inline to browse nested folders and play files without switching tabs
-10. Click any video card or folder video item -> opens watch page in a **new tab**
-11. Video resumes from last position automatically
-12. Close the tab - progress is saved
+2. Open **Settings** → **Media Sources** if you want to add more mounted folders
+3. Click **Scan Library** — scan runs in background; watch the status bar
+4. Browse **All Videos** (newest first by default)
+5. Use **Folders** tab to navigate by directory
+6. Use **Continue Watching** tab to resume in-progress videos
+7. Use **Duplicates** tab to review likely duplicate candidates
+8. Click **Scan Duplicates** to run a separate duplicate scan
+9. Use **Diagnostics** tab to inspect problematic files and quick-filter the library
+10. In **Folders**, expand folders inline to browse nested folders and play files without switching tabs
+11. Click any video card or folder video item -> opens watch page in a **new tab**
+12. Video resumes from last position automatically
+13. Close the tab - progress is saved
 
 ## API endpoints
 
@@ -317,6 +367,17 @@ Open the app: `http://NAS_IP:8080`
 | `POST` | `/api/scan/cancel` | Request graceful cancellation of active scan |
 | `GET` | `/api/scan/status` | Current scan status with discovery counters |
 | `GET` | `/api/scan/last-result` | Last scan result |
+
+### Settings / Media Sources
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/settings/media-sources` | List configured media sources |
+| `POST` | `/api/settings/media-sources` | Create a media source |
+| `GET` | `/api/settings/media-sources/{id}` | Get one media source |
+| `PUT` | `/api/settings/media-sources/{id}` | Update a media source |
+| `DELETE` | `/api/settings/media-sources/{id}` | Remove a media source config |
+| `POST` | `/api/settings/media-sources/validate` | Validate a container path before saving |
+| `POST` | `/api/settings/media-sources/{id}/scan` | Start a library scan of all enabled sources |
 
 ### Library diagnostics
 | Method | Path | Description |

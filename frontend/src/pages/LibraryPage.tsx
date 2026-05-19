@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   cancelScan,
   cancelHlsBatch,
@@ -76,6 +77,7 @@ function confidenceLabel(confidence: DuplicateGroup["confidence"]): string {
 }
 
 export function LibraryPage() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("all");
   const [videos, setVideos] = useState<VideoListItem[]>([]);
   const [continueWatching, setContinueWatching] = useState<VideoWithProgress[]>([]);
@@ -757,6 +759,9 @@ export function LibraryPage() {
         <header className="page-header page-header-actions">
           <h1>NAS Video Player</h1>
           <div className="header-actions">
+            <button className="btn-secondary" onClick={() => navigate("/settings")}>
+              Settings
+            </button>
             <button onClick={onScanClick}>
               {scanStatus?.status === "running" || scanStatus?.status === "cancelling" ? "Scanning…" : "Scan Library"}
             </button>

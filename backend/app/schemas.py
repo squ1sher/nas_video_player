@@ -47,6 +47,9 @@ class ScanStatusOut(BaseModel):
     removed_missing: int = 0
     errors: list[str]
     current_file: Optional[str]
+    current_root: Optional[str] = None
+    roots_scanned: int = 0
+    total_roots: int = 0
     message: str | None = None
 
 
@@ -448,3 +451,50 @@ class PlaybackSourceOut(BaseModel):
     reason: str
 
 
+# ── Library Root / Media Source schemas ──────────────────────────────────────
+
+class LibraryRootIn(BaseModel):
+    name: str
+    path: str
+    media_type: str = "video"
+    enabled: bool = True
+    recursive: bool = True
+    scan_priority: int = 100
+
+
+class LibraryRootUpdate(BaseModel):
+    name: Optional[str] = None
+    path: Optional[str] = None
+    media_type: Optional[str] = None
+    enabled: Optional[bool] = None
+    recursive: Optional[bool] = None
+    scan_priority: Optional[int] = None
+
+
+class LibraryRootOut(BaseModel):
+    id: int
+    name: str
+    path: str
+    media_type: str
+    enabled: bool
+    recursive: bool
+    scan_priority: int
+    last_scanned_at: Optional[datetime]
+    last_scan_status: Optional[str]
+    last_error: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    video_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class PathValidationRequest(BaseModel):
+    path: str
+
+
+class PathValidationResult(BaseModel):
+    valid: bool
+    path: Optional[str] = None
+    code: Optional[str] = None
+    message: str

@@ -12,10 +12,14 @@ import type {
   HlsPrepareResponse,
   HlsRepairResponse,
   HlsVideoStatus,
+  LibraryRoot,
+  LibraryRootIn,
+  LibraryRootUpdate,
   LibrarySummary,
   MediaProfileDetail,
   MediaProfileItem,
   ManualPlaybackStatus,
+  PathValidationResult,
   PlaybackSource,
   ScanStartedResponse,
   ScanStatus,
@@ -331,3 +335,62 @@ export async function regenerateThumbnail(videoId: number): Promise<VideoDetail>
   );
 }
 
+// ── Settings – Media Sources ───────────────────────────────────────────────
+
+export async function getMediaSources(): Promise<LibraryRoot[]> {
+  return handleResponse<LibraryRoot[]>(
+    await fetch(`${API_BASE}/settings/media-sources?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function getMediaSource(id: number): Promise<LibraryRoot> {
+  return handleResponse<LibraryRoot>(
+    await fetch(`${API_BASE}/settings/media-sources/${id}`)
+  );
+}
+
+export async function createMediaSource(data: LibraryRootIn): Promise<LibraryRoot> {
+  return handleResponse<LibraryRoot>(
+    await fetch(`${API_BASE}/settings/media-sources`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    })
+  );
+}
+
+export async function updateMediaSource(id: number, data: LibraryRootUpdate): Promise<LibraryRoot> {
+  return handleResponse<LibraryRoot>(
+    await fetch(`${API_BASE}/settings/media-sources/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    })
+  );
+}
+
+export async function deleteMediaSource(id: number): Promise<{ deleted: boolean; message: string }> {
+  return handleResponse<{ deleted: boolean; message: string }>(
+    await fetch(`${API_BASE}/settings/media-sources/${id}`, {
+      method: "DELETE",
+    })
+  );
+}
+
+export async function validateMediaSourcePath(path: string): Promise<PathValidationResult> {
+  return handleResponse<PathValidationResult>(
+    await fetch(`${API_BASE}/settings/media-sources/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    })
+  );
+}
+
+export async function scanMediaSource(id: number): Promise<ScanStartedResponse> {
+  return handleResponse<ScanStartedResponse>(
+    await fetch(`${API_BASE}/settings/media-sources/${id}/scan`, {
+      method: "POST",
+    })
+  );
+}

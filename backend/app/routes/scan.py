@@ -29,6 +29,9 @@ def _scan_state_payload(state) -> dict[str, object]:
         "removed_missing": state.removed_missing,
         "errors": state.errors,
         "current_file": state.current_file,
+        "current_root": state.current_root,
+        "roots_scanned": state.roots_scanned,
+        "total_roots": state.total_roots,
         "message": state.message,
     }
     return ScanStatusOut(**payload).model_dump(mode="json")
@@ -88,6 +91,9 @@ def get_scan_status() -> ScanStatusOut:
         removed_missing=state.removed_missing,
         errors=state.errors,
         current_file=state.current_file,
+        current_root=state.current_root,
+        roots_scanned=state.roots_scanned,
+        total_roots=state.total_roots,
         message=state.message,
     )
 
@@ -116,5 +122,8 @@ def get_last_scan_result() -> ScanStatusOut:
         removed_missing=state.removed_missing,
         errors=state.errors,
         current_file=state.current_file,
+        current_root=state.current_root,
+        roots_scanned=state.roots_scanned,
+        total_roots=state.total_roots,
         message=state.message,
     )

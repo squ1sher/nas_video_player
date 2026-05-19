@@ -34,7 +34,7 @@ from app.services.hls_service import (
     validate_hls_quality,
     validate_segment_name,
 )
-from app.utils.files import safe_resolve_under_root
+from app.services.library_root_service import resolve_video_source_path
 
 video_hls_router = APIRouter(prefix="/api/videos", tags=["hls"])
 global_hls_router = APIRouter(prefix="/api/hls", tags=["hls"])
@@ -56,10 +56,7 @@ def prepare_hls(
 ) -> HlsPrepareOut:
     video = _get_video_or_404(db, video_id)
 
-    try:
-        source_path = safe_resolve_under_root(settings.video_library_path, video.relative_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Source file not found") from exc
+    source_path = resolve_video_source_path(video, settings)
     if not source_path.exists() or not source_path.is_file():
         raise HTTPException(status_code=404, detail="Source file not found")
 
@@ -100,15 +97,7 @@ def get_playback_source(
     settings: Settings = Depends(get_settings),
 ) -> PlaybackSourceOut:
     video = _get_video_or_404(db, video_id)
-    try:
-        source_path = safe_resolve_under_root(settings.video_library_path, video.relative_path)
-    except ValueError:
-        return PlaybackSourceOut(
-            source_type="none",
-            stream_url=None,
-            available_qualities=[],
-            reason="Source file is missing.",
-        )
+    source_path = resolve_video_source_path(video, settings)
 
     if not source_path.exists() or not source_path.is_file():
         return PlaybackSourceOut(

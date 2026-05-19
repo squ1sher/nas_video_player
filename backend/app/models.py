@@ -6,15 +6,39 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 
-class Video(Base):
-    __tablename__ = "videos"
-    __table_args__ = (UniqueConstraint("relative_path", name="uq_videos_relative_path"),)
+class LibraryRoot(Base):
+    """Configurable media source / library root directory."""
+
+    __tablename__ = "library_roots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    path: Mapped[str] = mapped_column(String(2048), nullable=False, unique=True)
+    media_type: Mapped[str] = mapped_column(String(32), nullable=False, default="video")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    recursive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    scan_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_scan_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Video(Base):
+    __tablename__ = "videos"
+    __table_args__ = (UniqueConstraint("library_root_id", "relative_path", name="uq_videos_root_relative_path"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    library_root_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("library_roots.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
     relative_path: Mapped[str] = mapped_column(String(1024), nullable=False, index=True)
-    absolute_path: Mapped[str] = mapped_column(String(2048), nullable=False)
+    absolute_path: Mapped[str] = mapped_column(String(2048), nullable=False, index=True)
     extension: Mapped[str] = mapped_column(String(16), nullable=False)
     size: Mapped[int] = mapped_column(Integer, nullable=False)
     modified_ts: Mapped[float] = mapped_column(Float, nullable=False)

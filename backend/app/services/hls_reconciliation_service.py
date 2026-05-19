@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings
 from ..models import HlsBatch, HlsBatchItem, HlsJob, Video, VideoVariant
-from ..utils.files import safe_resolve_under_root
+from .library_root_service import resolve_video_source_path
 
 ALLOWED_QUALITIES = ("480p", "720p", "1080p")
 
@@ -241,10 +241,7 @@ def reconcile_video_hls(db: Session, settings: Settings, video: Video) -> HlsRec
 
 
 def _source_exists(video: Video, settings: Settings) -> bool:
-    try:
-        source = safe_resolve_under_root(settings.video_library_path, video.relative_path)
-    except ValueError:
-        return False
+    source = resolve_video_source_path(video, settings)
     return source.exists() and source.is_file()
 
 

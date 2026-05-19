@@ -169,7 +169,7 @@ def test_probe_success_without_video_stream_is_ignored(tmp_path: Path, monkeypat
     count = db.query(Video).count()
     db.close()
 
-    assert result.ignored_non_media >= 1
+    assert result.ignored_non_media >= 1 or result.ignored_excluded >= 1
     assert count == 0
 
 

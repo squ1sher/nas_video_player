@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 import app.database as db_module
 from app.models import HlsBatch, HlsBatchItem, HlsJob, Video, VideoVariant
+from app.services.library_root_service import resolve_video_source_path
 from app.services.hls_reconciliation_service import (
     collect_hls_diagnostics,
     has_valid_hls,
@@ -21,7 +22,6 @@ from app.services.hls_reconciliation_service import (
     reconcile_all_hls,
     reconcile_video_hls,
 )
-from app.utils.files import safe_resolve_under_root
 
 ALLOWED_QUALITIES = ("480p", "720p", "1080p")
 QUALITY_PROFILES: dict[str, dict[str, int]] = {
@@ -443,12 +443,7 @@ def create_library_batch(
         if reconcile_hls_variants_for_video(db, settings, video.id):
             repaired_stale_hls += 1
 
-        try:
-            resolved = safe_resolve_under_root(settings.video_library_path, video.relative_path)
-        except ValueError:
-            skipped_missing_source += 1
-            skipped_items.append((video.id, "source_file_missing"))
-            continue
+        resolved = resolve_video_source_path(video, settings)
 
         if not resolved.exists() or not resolved.is_file():
             skipped_missing_source += 1
@@ -914,18 +909,7 @@ def _prepare_hls_worker(video_id: int, job_id: int, qualities: list[str], force:
         _update_job(db, job, status="running", started=True, progress=0.0)
         db.commit()
 
-        try:
-            input_path = safe_resolve_under_root(settings.video_library_path, video.relative_path)
-        except ValueError:
-            _update_job(
-                db,
-                job,
-                status="failed",
-                error_message="Source file path is invalid",
-                finished=True,
-            )
-            db.commit()
-            return
+        input_path = resolve_video_source_path(video, settings)
 
         if not input_path.exists() or not input_path.is_file():
             _update_job(db, job, status="failed", error_message="Source file not found", finished=True)

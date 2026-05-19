@@ -7,12 +7,18 @@ type Props = {
 export function ScanStatusBar({ status }: Props) {
   if (!status || status.status === "idle") return null;
 
+  const currentFile = status.current_file ? status.current_file.split("/").pop() : null;
+  const currentRoot = status.current_root ? status.current_root.split("/").filter(Boolean).pop() ?? status.current_root : null;
+  const rootProgress = status.total_roots > 0 ? ` (${status.roots_scanned}/${status.total_roots} roots)` : "";
+
   if (status.status === "running" || status.status === "cancelling") {
     return (
       <div className="scan-status scan-running">
         <span className="scan-spinner" />
         {status.status === "cancelling" ? "Cancelling scan" : "Scanning library"}
-        {status.current_file ? `: ${status.current_file.split("/").pop()}` : "..."}
+        {rootProgress}
+        {currentRoot ? ` — ${currentRoot}` : ""}
+        {currentFile ? `: ${currentFile}` : "..."}
       </div>
     );
   }
@@ -20,7 +26,7 @@ export function ScanStatusBar({ status }: Props) {
   if (status.status === "completed") {
     return (
       <div className="scan-status scan-done">
-        ✓ Scan complete &mdash; {status.scanned_files} scanned, {status.detected_videos} detected videos,{" "}
+        ✓ Scan complete{rootProgress} &mdash; {status.scanned_files} scanned, {status.detected_videos} detected videos,{" "}
         {status.existing_unchanged} unchanged, {status.added} added, {status.updated} updated,{" "}
         {status.removed_missing} removed missing, {status.probe_failed} probe failed
         {status.errors.length > 0 && (
