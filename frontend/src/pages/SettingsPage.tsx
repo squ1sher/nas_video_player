@@ -314,9 +314,21 @@ export function SettingsPage() {
 
       {/* Future settings sections (placeholders) */}
       <section className="settings-section settings-section-future">
+        <h2>Maintenance</h2>
+        <p className="settings-section-desc">
+          Analyze and clean stale generated data: orphan HLS cache, thumbnails, duplicate records.
+          <br />
+          Original media files are <strong>never</strong> deleted by maintenance cleanup.
+        </p>
+        <button className="btn-secondary" onClick={() => navigate("/maintenance")}>
+          Open Maintenance →
+        </button>
+      </section>
+
+      <section className="settings-section settings-section-future">
         <h2>More Settings — Coming Soon</h2>
         <p className="settings-section-desc">
-          Planned: Scan settings, HLS settings, Thumbnail settings, Cache settings, Diagnostics, Photo library, User
+          Planned: Scan settings, HLS settings, Thumbnail settings, Cache settings, Photo library, User
           preferences, Backup/Restore.
         </p>
       </section>
@@ -455,8 +467,15 @@ export function SettingsPage() {
                 Remove <strong>{confirmDelete.name}</strong> (<code>{confirmDelete.path}</code>)?
               </p>
               <p className="form-hint">
-                Original media files will <strong>not</strong> be deleted. Videos in the index will remain until the
-                next scan removes them.
+                <strong>Original media files will NOT be deleted.</strong>
+              </p>
+              <p className="form-hint">
+                {confirmDelete.video_count} video(s) from this source will be hidden from the normal
+                library and marked as <em>source_removed</em>. They remain in the database.
+              </p>
+              <p className="form-hint">
+                Generated HLS cache is preserved. Use <strong>Settings → Maintenance</strong> to clean
+                it up later if needed.
               </p>
             </div>
             <div className="modal-footer">

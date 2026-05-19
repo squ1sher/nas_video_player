@@ -213,7 +213,8 @@ def delete_media_source(source_id: int, db: Session = Depends(get_db)) -> dict:
     """
     Remove a media source configuration.
     Original media files are NOT deleted.
-    Videos under this source will remain in the index until the next scan.
+    HLS cache is NOT deleted (use Maintenance page to clean up later).
+    Videos from this source are marked source_removed and hidden from the normal library.
     """
     root = db.query(LibraryRoot).filter(LibraryRoot.id == source_id).first()
     if not root:
@@ -221,10 +222,11 @@ def delete_media_source(source_id: int, db: Session = Depends(get_db)) -> dict:
 
     video_count = db.query(Video).filter(Video.library_root_id == root.id).count()
 
-    # Detach videos from this root (set library_root_id to NULL)
-    # They will be cleaned up on the next full scan.
+    # Mark videos as source_removed and detach from root
+    # They are hidden from normal library but HLS/files are preserved
     db.query(Video).filter(Video.library_root_id == root.id).update(
-        {"library_root_id": None}, synchronize_session=False
+        {"library_root_id": None, "availability_status": "source_removed"},
+        synchronize_session=False,
     )
     db.delete(root)
     db.commit()
@@ -233,7 +235,9 @@ def delete_media_source(source_id: int, db: Session = Depends(get_db)) -> dict:
         "deleted": True,
         "message": (
             f"Media source '{root.name}' removed. "
-            f"{video_count} associated video(s) remain in the index until the next scan."
+            f"{video_count} video(s) marked as source_removed and hidden from the library. "
+            f"Original files and HLS cache are preserved. "
+            f"Use Settings → Maintenance to clean up generated cache."
         ),
     }
 

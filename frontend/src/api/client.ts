@@ -1,4 +1,7 @@
 import type {
+  CleanupApplyResult,
+  CleanupPlan,
+  CleanupSummary,
   DuplicateGroup,
   DuplicateMode,
   DuplicateScanStatus,
@@ -394,3 +397,35 @@ export async function scanMediaSource(id: number): Promise<ScanStartedResponse> 
     })
   );
 }
+
+// ── Maintenance / Cleanup ───────────────────────────────────────────────────
+
+export async function getMaintenanceSummary(): Promise<CleanupSummary> {
+  return handleResponse<CleanupSummary>(
+    await fetch(`${API_BASE}/maintenance/cleanup/summary?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function createCleanupPlan(include: Record<string, boolean>): Promise<CleanupPlan> {
+  return handleResponse<CleanupPlan>(
+    await fetch(`${API_BASE}/maintenance/cleanup/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ include }),
+    })
+  );
+}
+
+export async function applyCleanupPlan(
+  planId: string,
+  itemIds?: string[],
+): Promise<CleanupApplyResult> {
+  return handleResponse<CleanupApplyResult>(
+    await fetch(`${API_BASE}/maintenance/cleanup/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan_id: planId, items: itemIds }),
+    })
+  );
+}
+

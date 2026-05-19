@@ -137,7 +137,14 @@ export function WatchPage() {
 
   const handleDelete = async () => {
     if (!video) return;
-    const ok = window.confirm("Delete this video from the library? This will also try to delete the source file.");
+    const ok = window.confirm(
+      "Delete this video?\n\n" +
+      "• The original media file will be permanently deleted from disk.\n" +
+      "• Generated HLS cache and thumbnails will also be removed.\n" +
+      "• Watch progress and related records will be removed.\n" +
+      "• This action cannot be undone.\n\n" +
+      "If deletion fails (read-only mount / permissions), nothing will be removed."
+    );
     if (!ok) return;
 
     try {

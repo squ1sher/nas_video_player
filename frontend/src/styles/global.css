@@ -1699,3 +1699,141 @@ button {
   }
 }
 
+/* ── Maintenance Page ────────────────────────────────────────────────────── */
+
+.maintenance-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.summary-card {
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.summary-card h3 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  margin: 0 0 0.75rem;
+}
+
+.summary-rows {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.25rem 1rem;
+  font-size: 0.85rem;
+  align-items: center;
+}
+
+.summary-rows strong {
+  text-align: right;
+}
+
+.summary-rows strong.warn {
+  color: #f59e0b;
+}
+
+.summary-card-total {
+  border-color: #3b82f6;
+  text-align: center;
+}
+
+.summary-potential {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #f59e0b;
+  margin: 0.5rem 0;
+}
+
+.maintenance-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.label-risky {
+  color: #f59e0b;
+}
+
+.cleanup-group {
+  margin-top: 1.25rem;
+}
+
+.cleanup-group-header {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  border-bottom: 1px solid #2a2a4a;
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.cleanup-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.cleanup-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #12122a;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.cleanup-item:hover {
+  border-color: #3b82f6;
+}
+
+.cleanup-item-risky {
+  border-color: #78350f;
+  background: #1c1007;
+}
+
+.cleanup-item-risky:hover {
+  border-color: #f59e0b;
+}
+
+.cleanup-item input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.cleanup-item-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.cleanup-item-reason {
+  font-size: 0.85rem;
+  color: #e2e8f0;
+}
+
+.cleanup-item-meta {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.cleanup-item-meta code {
+  color: #94a3b8;
+  font-size: 0.75rem;
+}

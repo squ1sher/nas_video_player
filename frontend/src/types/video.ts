@@ -439,3 +439,71 @@ export type PathValidationResult = {
   code?: string;
   message: string;
 };
+
+// ── Maintenance / Cleanup types ────────────────────────────────────────────
+
+export type CleanupHlsSummary = {
+  valid_hls: number;
+  orphan_hls_folders: number;
+  orphan_hls_size: number;
+  db_completed_but_files_missing: number;
+  files_exist_but_db_missing: number;
+  stale_running_jobs: number;
+  stale_queued_jobs: number;
+  failed_jobs_old: number;
+};
+
+export type CleanupVideoSummary = {
+  available: number;
+  missing: number;
+  source_disabled: number;
+  source_removed: number;
+  deleted: number;
+};
+
+export type CleanupThumbnailSummary = {
+  orphan_thumbnails: number;
+  orphan_thumbnails_size: number;
+};
+
+export type CleanupDuplicateSummary = {
+  stale_duplicate_items: number;
+  stale_duplicate_groups: number;
+};
+
+export type CleanupSummary = {
+  hls: CleanupHlsSummary;
+  videos: CleanupVideoSummary;
+  thumbnails: CleanupThumbnailSummary;
+  duplicates: CleanupDuplicateSummary;
+  potential_cleanup_size: number;
+};
+
+export type CleanupItem = {
+  item_id: string;
+  type: string;
+  video_id: number | null;
+  path: string | null;
+  size: number;
+  action: string;
+  safe: boolean;
+  reason: string;
+};
+
+export type CleanupPlan = {
+  plan_id: string;
+  dry_run: boolean;
+  items: CleanupItem[];
+  total_items: number;
+  total_size_to_delete: number;
+};
+
+export type CleanupApplyResult = {
+  status: string;
+  deleted_files: number;
+  deleted_folders: number;
+  deleted_size: number;
+  db_records_updated: number;
+  errors: string[];
+};
+

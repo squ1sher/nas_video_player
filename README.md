@@ -13,7 +13,83 @@ Mini-YouTube style local web video player for Synology NAS.
 - DSM 7.2.2+ (tested target: 7.2.2-72806 Update 5)
 - Synology Container Manager (Docker Compose)
 
-## Phase 1.8 Features (current)
+## Phase 2.6 Features (current)
+
+### Maintenance Cleanup — Settings → Maintenance
+
+A **Maintenance** page under Settings that analyzes and safely cleans stale generated data.
+
+#### What it detects
+
+| Category | Detail |
+|---|---|
+| Orphan HLS folders | `HLS_OUTPUT_PATH/{id}/` exists but no video record |
+| HLS DB / file mismatch | DB says completed but `master.m3u8` / segments are missing |
+| Orphan thumbnails | Thumbnail file exists but no video references it |
+| Stale HLS jobs | Jobs stuck in `pending`/`running` for > 2 h |
+| Stale duplicate records | Duplicate items pointing to deleted videos |
+| Video availability breakdown | available / missing / source_disabled / source_removed |
+
+#### Repair vs. Cleanup
+
+| Action | Deletes files? | Changes DB? |
+|---|---|---|
+| **Repair HLS State** | Never | Yes – reconciles DB ↔ filesystem |
+| **Cleanup** | Yes (only generated files) | Yes – removes stale records |
+
+#### Cleanup safety rules
+
+- **Original media files are NEVER deleted by generic cleanup**.
+- By default, HLS cache for `source_removed` / `missing` videos is **not** selected.
+- All cleanup goes through a dry-run plan → confirm → apply workflow.
+- Optional/risky categories are labelled ⚠ and left unchecked by default.
+
+### Video Deletion Cascade (fixed)
+
+When a user deletes a video from the Watch page:
+
+1. Original source file is deleted first.
+2. If source file deletion fails (read-only mount / permissions):
+   - Clear error is shown: "Failed to delete source file. Check Docker volume mode and Synology permissions."
+   - Nothing else is removed (no HLS, no DB record).
+3. If source file deletion succeeds:
+   - HLS cache folder (`HLS_OUTPUT_PATH/{video_id}/`) is deleted.
+   - Thumbnail file is deleted.
+   - Active HLS jobs for the video are marked failed.
+   - `VideoVariant`, `WatchProgress`, `DuplicateCandidateItem` DB rows are removed.
+   - Video row is hard-deleted.
+
+### Media Source Deletion Policy
+
+When a media source is removed from Settings:
+
+- **Original media files are NOT deleted.**
+- **HLS cache is NOT deleted** — use Maintenance to clean up later if needed.
+- Videos from that source are marked `availability_status = source_removed`.
+- Marked videos are hidden from the normal library but remain in the DB.
+- The Maintenance page shows source_removed video counts and allows optional HLS cleanup.
+
+### Video Availability Status
+
+New `availability_status` field on `Video`:
+
+| Status | Meaning | Shown in library? |
+|---|---|---|
+| `NULL` / `available` | Source file exists, source enabled | ✅ Yes |
+| `missing` | Source enabled but file not found on disk | ✅ Yes |
+| `source_disabled` | Library root is disabled | ❌ Hidden |
+| `source_removed` | Library root was deleted | ❌ Hidden |
+| `deleted` | User deleted via app (for future use) | ❌ Hidden |
+
+### Maintenance API
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/maintenance/cleanup/summary` | GET | Summary of orphan/stale data |
+| `/api/maintenance/cleanup/plan` | POST | Generate dry-run cleanup plan |
+| `/api/maintenance/cleanup/apply` | POST | Apply selected plan items |
+
+
 
 ### Application Settings and configurable Media Sources
 - New **Settings** page for managing media sources / library roots

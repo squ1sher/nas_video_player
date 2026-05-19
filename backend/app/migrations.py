@@ -188,6 +188,7 @@ def run_migrations(engine: Engine) -> None:
         ("effective_compatibility_status", "VARCHAR(32)"),
         ("compatibility_source", "VARCHAR(64)"),
         ("manual_playback_status", "VARCHAR(32)"),
+        ("availability_status", "VARCHAR(32)"),
     ]
     for col, col_def in videos_migrations:
         _add_column_if_missing(engine, "videos", col, col_def)
@@ -198,6 +199,7 @@ def run_migrations(engine: Engine) -> None:
     _create_index_if_missing(engine, "ix_videos_folder_path", "videos", "folder_path")
     _create_index_if_missing(engine, "ix_videos_media_profile_id", "videos", "media_profile_id")
     _create_index_if_missing(engine, "ix_videos_media_profile_key", "videos", "media_profile_key")
+    _create_index_if_missing(engine, "ix_videos_availability_status", "videos", "availability_status")
 
     # ── media_profiles table ─────────────────────────────────────────────────
     with engine.begin() as conn:

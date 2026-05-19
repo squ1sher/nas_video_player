@@ -1,16 +1,17 @@
 import logging
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy import asc, desc
+from sqlalchemy import asc, desc, or_
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.media_probe import probe_video
-from app.models import MediaProfile, Video, WatchProgress
+from app.models import DuplicateCandidateItem, HlsJob, MediaProfile, Video, VideoVariant, WatchProgress
 from app.schemas import VideoDetail, VideoListItem
 from app.services.library_root_service import resolve_video_source_path
 from app.services.media_profile_service import (
@@ -143,11 +144,24 @@ def list_videos(
     media_profile_id: int | None = None,
     compatibility_source: str | None = None,
     effective_compatibility_status: str | None = None,
+    availability_status: str | None = None,
+    show_all: bool = False,
     sort: str = "created_at",
     order: str = "desc",
     db: Session = Depends(get_db),
 ) -> list[VideoListItem]:
     query = db.query(Video)
+    # By default exclude source_removed, source_disabled, deleted from normal library view
+    if not show_all and availability_status is None:
+        query = query.filter(
+            or_(
+                Video.availability_status.is_(None),
+                Video.availability_status == "available",
+                Video.availability_status == "missing",
+            )
+        )
+    elif availability_status is not None:
+        query = query.filter(Video.availability_status == availability_status)
     if q:
         query = query.filter(Video.title.ilike(f"%{q}%"))
     if folder is not None:
@@ -375,7 +389,7 @@ def delete_video(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, bool]:
-    """Delete video from index and optionally delete source file from library."""
+    """Delete video from index and remove source file, HLS cache, thumbnail, and related records."""
     video = get_video_or_404(db, video_id)
 
     if delete_file:
@@ -388,11 +402,48 @@ def delete_video(
                 logger.warning("Failed to delete source file video id=%s: %s", video_id, exc)
                 raise HTTPException(
                     status_code=409,
-                    detail="Failed to delete source file. Check mount mode and file permissions.",
+                    detail=(
+                        "Failed to delete source file. "
+                        "Check Docker volume mode and Synology permissions."
+                    ),
                 ) from exc
 
-    # SQLite foreign keys may be disabled, so explicitly clean progress rows.
+    # Delete HLS cache folder (best-effort; log warning on failure)
+    hls_dir = settings.hls_output_path.resolve() / str(video_id)
+    if hls_dir.exists() and hls_dir.is_dir():
+        try:
+            shutil.rmtree(hls_dir)
+            logger.info("Deleted HLS cache for video_id=%s", video_id)
+        except OSError as exc:
+            logger.warning("Failed to delete HLS cache for video_id=%s: %s", video_id, exc)
+
+    # Delete thumbnail file (best-effort)
+    if video.thumbnail_path:
+        thumb_path = settings.thumbnails_path / video.thumbnail_path
+        if thumb_path.exists():
+            try:
+                thumb_path.unlink()
+                logger.info("Deleted thumbnail for video_id=%s", video_id)
+            except OSError as exc:
+                logger.warning("Failed to delete thumbnail for video_id=%s: %s", video_id, exc)
+
+    # Mark active HLS jobs as failed so background workers stop gracefully
+    now = datetime.now(timezone.utc)
+    active_jobs = db.query(HlsJob).filter(
+        HlsJob.video_id == video_id,
+        HlsJob.status.in_(["pending", "running"]),
+    ).all()
+    for job in active_jobs:
+        job.status = "failed"
+        job.error_message = "Video deleted by user."
+        job.finished_at = now
+
+    # Explicitly delete related records (SQLite FK enforcement may be disabled)
     db.query(WatchProgress).filter(WatchProgress.video_id == video_id).delete()
+    db.query(VideoVariant).filter(VideoVariant.video_id == video_id).delete()
+    db.query(DuplicateCandidateItem).filter(DuplicateCandidateItem.video_id == video_id).delete()
+
+    db.flush()
     db.delete(video)
     db.commit()
     return {"deleted": True}

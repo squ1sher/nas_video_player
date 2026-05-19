@@ -77,6 +77,9 @@ class Video(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+    # Availability status: None / "available" = normal; "missing" = source enabled but file gone;
+    # "source_disabled" = root disabled; "source_removed" = root deleted; "deleted" = user deleted
+    availability_status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
 
 class WatchProgress(Base):
@@ -258,5 +261,4 @@ class HlsBatchItem(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
 

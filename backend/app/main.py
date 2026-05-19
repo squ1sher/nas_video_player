@@ -16,6 +16,7 @@ from app.routes.folders import router as folders_router
 from app.routes.health import router as health_router
 from app.routes.hls import global_hls_router, video_hls_router
 from app.routes.library import router as library_router
+from app.routes.maintenance import router as maintenance_router
 from app.routes.media_profiles import router as media_profiles_router
 from app.routes.progress import router as progress_router
 from app.routes.scan import router as scan_router
@@ -31,13 +32,14 @@ configure_logging(settings.logs_path)
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="NAS Video Player", version="0.2.5")
+app = FastAPI(title="NAS Video Player", version="0.2.6")
 
 app.include_router(health_router)
 app.include_router(scan_router)
 app.include_router(settings_router)
 app.include_router(library_router)
 app.include_router(media_profiles_router)
+app.include_router(maintenance_router)
 # progress_router MUST come before videos_router so /continue-watching
 # is matched before /{video_id}
 app.include_router(progress_router)
