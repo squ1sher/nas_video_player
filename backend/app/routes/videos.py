@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.media_probe import probe_video
-from app.models import DuplicateCandidateItem, HlsJob, MediaProfile, Video, VideoVariant, WatchProgress
+from app.models import DuplicateCandidateItem, HlsJob, LibraryRoot, MediaProfile, Video, VideoVariant, WatchProgress
 from app.schemas import VideoDetail, VideoListItem
 from app.services.library_root_service import resolve_video_source_path
 from app.services.media_profile_service import (
@@ -37,11 +37,13 @@ SORT_FIELDS = {
 }
 
 
-def to_list_item(video: Video) -> VideoListItem:
+def to_list_item(video: Video, library_root_name: str | None = None) -> VideoListItem:
     thumb_url = f"/api/videos/{video.id}/thumbnail" if video.thumbnail_path else None
     file_modified_at = datetime.fromtimestamp(video.modified_ts, tz=timezone.utc) if video.modified_ts else None
     return VideoListItem(
         id=video.id,
+        library_root_id=video.library_root_id,
+        library_root_name=library_root_name,
         title=video.title,
         filename=video.filename,
         extension=video.extension,
@@ -79,11 +81,13 @@ def to_list_item(video: Video) -> VideoListItem:
     )
 
 
-def to_detail(video: Video) -> VideoDetail:
+def to_detail(video: Video, library_root_name: str | None = None) -> VideoDetail:
     thumb_url = f"/api/videos/{video.id}/thumbnail" if video.thumbnail_path else None
     file_modified_at = datetime.fromtimestamp(video.modified_ts, tz=timezone.utc) if video.modified_ts else None
     return VideoDetail(
         id=video.id,
+        library_root_id=video.library_root_id,
+        library_root_name=library_root_name,
         title=video.title,
         filename=video.filename,
         relative_path=video.relative_path,
@@ -128,6 +132,13 @@ def get_video_or_404(db: Session, video_id: int) -> Video:
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
     return video
+
+
+def _library_root_name_for_video(db: Session, video: Video) -> str | None:
+    if video.library_root_id is None:
+        return None
+    root = db.query(LibraryRoot).filter(LibraryRoot.id == video.library_root_id).first()
+    return root.name if root else None
 
 
 @router.get("", response_model=list[VideoListItem])
@@ -198,13 +209,17 @@ def list_videos(
     sort_field = SORT_FIELDS.get(sort, Video.created_at)
     sort_direction = desc if order.lower() == "desc" else asc
     videos = query.order_by(sort_direction(sort_field)).all()
-    return [to_list_item(video) for video in videos]
+    root_name_by_id = {
+        root.id: root.name
+        for root in db.query(LibraryRoot).all()
+    }
+    return [to_list_item(video, root_name_by_id.get(video.library_root_id)) for video in videos]
 
 
 @router.get("/{video_id}", response_model=VideoDetail)
 def get_video(video_id: int, db: Session = Depends(get_db)) -> VideoDetail:
     video = get_video_or_404(db, video_id)
-    return to_detail(video)
+    return to_detail(video, _library_root_name_for_video(db, video))
 
 
 @router.post("/{video_id}/reprobe", response_model=VideoDetail)
@@ -320,7 +335,7 @@ def reprobe_video(
 
     db.commit()
     db.refresh(video)
-    return to_detail(video)
+    return to_detail(video, _library_root_name_for_video(db, video))
 
 
 @router.post("/{video_id}/thumbnail/regenerate", response_model=VideoDetail)
@@ -346,7 +361,7 @@ def regenerate_video_thumbnail(
 
     db.commit()
     db.refresh(video)
-    return to_detail(video)
+    return to_detail(video, _library_root_name_for_video(db, video))
 
 
 @router.get("/{video_id}/thumbnail")

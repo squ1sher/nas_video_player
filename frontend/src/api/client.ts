@@ -7,6 +7,7 @@ import type {
   DuplicateScanStatus,
   DuplicateSummary,
   FolderInfo,
+  HealthStatus,
   HlsGlobalStatus,
   HlsDiagnostics,
   HlsBatchDetail,
@@ -249,6 +250,12 @@ export async function getFolders(): Promise<FolderInfo[]> {
 export async function getLibrarySummary(): Promise<LibrarySummary> {
   return handleResponse<LibrarySummary>(
     await fetch(`${API_BASE}/library/summary?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function getHealthStatus(): Promise<HealthStatus> {
+  return handleResponse<HealthStatus>(
+    await fetch(`${API_BASE}/health?t=${Date.now()}`, { cache: "no-store" })
   );
 }
 

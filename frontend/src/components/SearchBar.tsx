@@ -8,7 +8,7 @@ export function SearchBar({ value, onChange }: Props) {
     <input
       className="search-input"
       type="search"
-      placeholder="Search videos..."
+      placeholder="Search"
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />

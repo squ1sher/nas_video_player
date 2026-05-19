@@ -1,5 +1,7 @@
 export type VideoListItem = {
   id: number;
+  library_root_id: number | null;
+  library_root_name: string | null;
   title: string;
   filename: string;
   extension: string;
@@ -38,6 +40,8 @@ export type VideoListItem = {
 
 export type VideoDetail = {
   id: number;
+  library_root_id: number | null;
+  library_root_name: string | null;
   title: string;
   filename: string;
   relative_path: string;
@@ -157,6 +161,8 @@ export type DuplicateFingerprint = {
 
 export type DuplicateGroupVideo = {
   id: number;
+  library_root_id: number | null;
+  library_root_name: string | null;
   title: string;
   filename: string;
   relative_path: string;
@@ -402,6 +408,11 @@ export type PlaybackSource = {
   stream_url: string | null;
   available_qualities: string[];
   reason: string;
+};
+
+export type HealthStatus = {
+  status: string;
+  runtime_dirs: Record<string, string>;
 };
 
 // ── Library Root / Media Source types ─────────────────────────────────────

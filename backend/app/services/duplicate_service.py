@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.duplicate_scan_status import update_duplicate_scan_progress
-from app.models import DuplicateCandidateGroup, DuplicateCandidateItem, DuplicateScanRun, Video
+from app.models import DuplicateCandidateGroup, DuplicateCandidateItem, DuplicateScanRun, LibraryRoot, Video
 from app.services.duplicate_fingerprint_service import (
     build_duplicate_fingerprint,
     build_strict_group_key,
@@ -185,6 +185,17 @@ def load_duplicate_groups(db: Session, mode: str = "strict") -> list[dict[str, o
     for item, video in items:
         grouped_items[item.group_id].append(video)
 
+    library_root_ids = {
+        video.library_root_id
+        for videos in grouped_items.values()
+        for video in videos
+        if video.library_root_id is not None
+    }
+    library_names_by_id: dict[int, str] = {}
+    if library_root_ids:
+        roots = db.query(LibraryRoot.id, LibraryRoot.name).filter(LibraryRoot.id.in_(library_root_ids)).all()
+        library_names_by_id = {root_id: name for root_id, name in roots}
+
     result: list[dict[str, object]] = []
     for group in groups:
         videos = sorted(grouped_items[group.id], key=_video_sort_key)
@@ -200,6 +211,10 @@ def load_duplicate_groups(db: Session, mode: str = "strict") -> list[dict[str, o
                 "videos": [
                     {
                         "id": video.id,
+                        "library_root_id": video.library_root_id,
+                        "library_root_name": library_names_by_id.get(video.library_root_id)
+                        if video.library_root_id is not None
+                        else None,
                         "title": video.title,
                         "filename": video.filename,
                         "relative_path": video.relative_path,

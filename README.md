@@ -108,7 +108,7 @@ New `availability_status` field on `Video`:
 - Progress saved every 5 seconds, on pause, and on page close
 - Resume from saved position or start from beginning
 - Videos marked **completed** when ≥ 90 % watched
-- **Continue Watching** section on library page
+- Continue Watching API remains available, but the main Library UI is now focused on browsing/watching only
 
 ### Browser compatibility status
 - Each video is analyzed for browser playback compatibility:
@@ -154,6 +154,8 @@ New `availability_status` field on `Video`:
 - File size sort (GiB buckets): `Under 1 GB`, `1-20 GB`, `20-100 GB`, `Over 100 GB`, `Unknown size`.
 - Grouping is applied after search and filters.
 - Every group can be collapsed/expanded.
+- Library cards are thumbnail-first with a compact hover title overlay (metadata lines are not shown under thumbnails).
+- The page renders an initial batch and uses a manual **Load more** button to reveal additional cards, reducing thumbnail load spikes.
 
 ### Pre-generated HLS streaming (manual per-video)
 - HLS variants are prepared **on demand** for a selected video.
@@ -191,8 +193,8 @@ New `availability_status` field on `Video`:
 - Shows duplicate groups, confidence, reason, thumbnails, relative paths, and potential space saving
 - Diagnostic only: duplicate scan does **not** delete, move, rename, or modify files
 
-### Diagnostics tab and library summary
-- New **Diagnostics** tab provides high-level library health cards:
+### Playback Compatibility and library summary
+- **Playback Compatibility** section (in Settings) provides high-level library health cards:
   - Total indexed, Direct Play, May Play, May Not Play, Needs Conversion, Unknown
   - Probe Failed, Thumbnail Failed, Potential duplicate saving
 - New backend summary endpoint: `GET /api/library/summary`
@@ -220,6 +222,22 @@ New `availability_status` field on `Video`:
 - This creates a practical compatibility matrix for your actual browser/device setup (for example `.360` profiles can be marked playable if they really work).
 
 ## Synology deployment and recovery
+## UI organization (current)
+
+- **Library** is now browsing-focused:
+  - All Videos
+  - Folders
+  - compact search/sort controls
+- **Settings** is operations-focused:
+  - Media Sources
+  - HLS / Streaming
+  - Duplicates
+  - Playback Compatibility
+  - Maintenance
+  - System / Runtime
+- Active background processes are shown in a global bottom status bar (scan, HLS batch/jobs, duplicate scan).
+- Library no longer contains Duplicates/Diagnostics process panels or large maintenance controls.
+
 
 ### Deployment folders
 
@@ -439,19 +457,18 @@ You do not need to edit `docker-compose.yml` for every new media subfolder; add 
 1. Open `http://NAS_IP:8080`
 2. Open **Settings** → **Media Sources**
 3. Browse `/volume1` and add one or more subfolders (for example `sclad/Movies`)
-4. Click **Scan Library** — scan runs in background; watch the status bar
+4. Click **Scan Library** from Settings — scan runs in background; watch the global status bar
    - If no media sources are configured, the app shows:
      `No media sources configured. Add folders in Settings -> Media Sources.`
 5. Browse **All Videos** (newest first by default)
-6. Use **Folders** tab to navigate by directory
-7. Use **Continue Watching** tab to resume in-progress videos
-8. Use **Duplicates** tab to review likely duplicate candidates
-9. Click **Scan Duplicates** to run a separate duplicate scan
-10. Use **Diagnostics** tab to inspect problematic files and quick-filter the library
-11. In **Folders**, expand folders inline to browse nested folders and play files without switching tabs
-12. Click any video card or folder video item -> opens watch page in a **new tab**
-13. Video resumes from last position automatically
-14. Close the tab - progress is saved
+6. Use **Folders** tab to navigate by media source and directory
+7. Use **Settings** → **Duplicates** to run duplicate scan and review candidates
+8. Use **Settings** → **Playback Compatibility** to review media profiles/manual playback status
+9. Use **Settings** → **HLS / Streaming** for HLS repair and batch preparation
+10. In **Folders**, expand folders inline to browse nested folders and play files without switching tabs
+11. Click any video card or folder video item -> opens watch page in a **new tab**
+12. Video resumes from last position automatically
+13. Close the tab - progress is saved
 
 ## API endpoints
 

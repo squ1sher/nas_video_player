@@ -1,29 +1,87 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
 import {
   browseMediaSources,
+  cancelHlsBatch,
+  clearMediaProfilePlaybackStatus,
+  createLibraryHlsBatch,
   createMediaSource,
   deleteMediaSource,
+  deleteVideo,
+  getDuplicateGroups,
+  getDuplicateStatus,
+  getDuplicateSummary,
+  getHealthStatus,
+  getHlsBatch,
+  getHlsGlobalStatus,
+  getMediaProfiles,
   getMediaSources,
+  repairStaleHls,
+  runScan,
   scanMediaSource,
+  setMediaProfilePlaybackStatus,
+  startDuplicateScan,
   updateMediaSource,
   validateMediaSourcePath,
 } from "../api/client";
-import type { LibraryRoot, LibraryRootIn, MediaSourceBrowseItem, PathValidationResult } from "../types/video";
+import type {
+  DuplicateGroup,
+  DuplicateScanStatus,
+  DuplicateSummary,
+  HealthStatus,
+  HlsBatchDetail,
+  HlsGlobalStatus,
+  LibraryRoot,
+  LibraryRootIn,
+  ManualPlaybackStatus,
+  MediaProfileItem,
+  MediaSourceBrowseItem,
+  PathValidationResult,
+} from "../types/video";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
   try {
     return new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
-  } catch { return iso; }
+  } catch {
+    return iso;
+  }
+}
+
+function fmtBytes(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function confidenceLabel(confidence: DuplicateGroup["confidence"]): string {
+  if (confidence === "exact_metadata_match") return "Exact metadata match";
+  if (confidence === "high") return "High";
+  return "Medium";
+}
+
+function duplicateLibraryLabel(video: { library_root_id: number | null; library_root_name: string | null }): string {
+  if (video.library_root_name && video.library_root_name.trim()) return video.library_root_name;
+  if (video.library_root_id !== null) return `ID ${video.library_root_id}`;
+  return "Unknown";
 }
 
 function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <span className="badge badge-unknown">—</span>;
   const cls =
-    status === "completed" || status === "completed_with_errors" ? "badge-ok" :
-    status === "error" ? "badge-err" :
-    status === "cancelled" ? "badge-warn" : "badge-unknown";
+    status === "completed" || status === "completed_with_errors"
+      ? "badge-ok"
+      : status === "error"
+        ? "badge-err"
+        : status === "cancelled"
+          ? "badge-warn"
+          : "badge-unknown";
   return <span className={`badge ${cls}`}>{status}</span>;
 }
 
@@ -40,6 +98,8 @@ const DEFAULT_FORM: LibraryRootIn = {
 
 export function SettingsPage() {
   const navigate = useNavigate();
+
+  // ── Media sources ───────────────────────────────────────────────────────
   const [sources, setSources] = useState<LibraryRoot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,26 +112,112 @@ export function SettingsPage() {
   const [scanning, setScanning] = useState<number | null>(null);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<LibraryRoot | null>(null);
+  const [scanAllBusy, setScanAllBusy] = useState(false);
 
   // Browse state
   const [browseOpen, setBrowseOpen] = useState(false);
-  const [browsePath, setBrowsePath] = useState("");   // current browse relative path
+  const [browsePath, setBrowsePath] = useState("");
   const [browseItems, setBrowseItems] = useState<MediaSourceBrowseItem[]>([]);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browseError, setBrowseError] = useState<string | null>(null);
 
+  // ── HLS/Streaming ───────────────────────────────────────────────────────
+  const [hlsGlobal, setHlsGlobal] = useState<HlsGlobalStatus | null>(null);
+  const [hlsBatch, setHlsBatch] = useState<HlsBatchDetail | null>(null);
+  const [hlsBusy, setHlsBusy] = useState(false);
+  const [hlsCancelBusy, setHlsCancelBusy] = useState(false);
+  const [hlsRepairBusy, setHlsRepairBusy] = useState(false);
+  const [hlsMsg, setHlsMsg] = useState<string | null>(null);
+
+  // ── Duplicates ──────────────────────────────────────────────────────────
+  const [duplicateStatus, setDuplicateStatus] = useState<DuplicateScanStatus | null>(null);
+  const [duplicateSummary, setDuplicateSummary] = useState<DuplicateSummary | null>(null);
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
+  const [duplicateBusy, setDuplicateBusy] = useState(false);
+  const [duplicateLoading, setDuplicateLoading] = useState(false);
+  const [duplicateMsg, setDuplicateMsg] = useState<string | null>(null);
+  const [deletingVideoId, setDeletingVideoId] = useState<number | null>(null);
+  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
+  const [selectedDuplicateIds, setSelectedDuplicateIds] = useState<Set<number>>(new Set());
+
+  // ── Playback compatibility ──────────────────────────────────────────────
+  const [mediaProfiles, setMediaProfiles] = useState<MediaProfileItem[]>([]);
+  const [profileBusyId, setProfileBusyId] = useState<number | null>(null);
+  const [profileMsg, setProfileMsg] = useState<string | null>(null);
+
+  // ── System ────────���─────────────────────────────────────────────────────
+  const [health, setHealth] = useState<HealthStatus | null>(null);
+
   const pathRef = useRef<HTMLInputElement>(null);
+
+  const loadMediaSources = async () => {
+    const data = await getMediaSources();
+    setSources(data);
+  };
+
+  const loadHlsState = async () => {
+    const global = await getHlsGlobalStatus();
+    setHlsGlobal(global);
+    if (global.active_batch_id !== null) {
+      const batch = await getHlsBatch(global.active_batch_id, { include_items: false });
+      setHlsBatch(batch);
+    } else {
+      setHlsBatch(null);
+    }
+  };
+
+  const loadDuplicates = async () => {
+    setDuplicateLoading(true);
+    try {
+      const [status, summary, groups] = await Promise.all([
+        getDuplicateStatus(),
+        getDuplicateSummary(),
+        getDuplicateGroups(),
+      ]);
+      setDuplicateStatus(status);
+      setDuplicateSummary(summary);
+      setDuplicateGroups(groups);
+      setSelectedDuplicateIds((prev) => {
+        const validIds = new Set(groups.flatMap((group) => group.videos.map((video) => video.id)));
+        const next = new Set<number>();
+        prev.forEach((id) => {
+          if (validIds.has(id)) next.add(id);
+        });
+        return next;
+      });
+    } finally {
+      setDuplicateLoading(false);
+    }
+  };
+
+  const loadCompatibility = async () => {
+    setMediaProfiles(await getMediaProfiles());
+  };
+
+  const loadSystem = async () => {
+    setHealth(await getHealthStatus());
+  };
 
   const load = async () => {
     try {
-      const data = await getMediaSources();
-      setSources(data);
+      await Promise.all([
+        loadMediaSources(),
+        loadHlsState(),
+        loadDuplicates(),
+        loadCompatibility(),
+        loadSystem(),
+      ]);
       setError(null);
-    } catch (e) { setError(String(e)); }
-    finally { setLoading(false); }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+  }, []);
 
   // ── Browse helpers ──────────────────────────────────────────────────────
 
@@ -114,9 +260,10 @@ export function SettingsPage() {
     setForm((f) => ({ ...f, path: item.internal_path }));
     setValidation(null);
     setBrowseOpen(false);
+    pathRef.current?.focus();
   };
 
-  // ── Modal helpers ───────────────────────────────────────────────────────
+  // ── Media source actions ────────────────────────────────────────────────
 
   const openAdd = () => {
     setForm(DEFAULT_FORM);
@@ -157,36 +304,55 @@ export function SettingsPage() {
       setValidation(result);
     } catch (e) {
       setValidation({ valid: false, message: String(e) });
-    } finally { setValidating(false); }
+    } finally {
+      setValidating(false);
+    }
   };
 
   const handleSave = async () => {
-    if (!form.name.trim()) { setSaveError("Name is required."); return; }
-    if (!form.path.trim()) { setSaveError("Path is required."); return; }
+    if (!form.name.trim()) {
+      setSaveError("Name is required.");
+      return;
+    }
+    if (!form.path.trim()) {
+      setSaveError("Path is required.");
+      return;
+    }
+
     setSaving(true);
     setSaveError(null);
     try {
-      if (modal?.mode === "add") await createMediaSource(form);
-      else if (modal?.mode === "edit" && modal.source) await updateMediaSource(modal.source.id, form);
+      if (modal?.mode === "add") {
+        await createMediaSource(form);
+      } else if (modal?.mode === "edit" && modal.source) {
+        await updateMediaSource(modal.source.id, form);
+      }
       closeModal();
-      await load();
-    } catch (e) { setSaveError(String(e)); }
-    finally { setSaving(false); }
+      await loadMediaSources();
+    } catch (e) {
+      setSaveError(String(e));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleToggleEnable = async (source: LibraryRoot) => {
     try {
       await updateMediaSource(source.id, { enabled: !source.enabled });
-      await load();
-    } catch (e) { setError(`Failed to update: ${String(e)}`); }
+      await loadMediaSources();
+    } catch (e) {
+      setError(`Failed to update: ${String(e)}`);
+    }
   };
 
   const handleDelete = async (source: LibraryRoot) => {
     try {
       await deleteMediaSource(source.id);
       setConfirmDelete(null);
-      await load();
-    } catch (e) { setError(`Failed to delete: ${String(e)}`); }
+      await loadMediaSources();
+    } catch (e) {
+      setError(`Failed to delete: ${String(e)}`);
+    }
   };
 
   const handleScanSource = async (source: LibraryRoot) => {
@@ -195,61 +361,227 @@ export function SettingsPage() {
     try {
       const resp = await scanMediaSource(source.id);
       setScanMsg(resp.message);
-    } catch (e) { setScanMsg(String(e)); }
-    finally { setScanning(null); }
+    } catch (e) {
+      setScanMsg(String(e));
+    } finally {
+      setScanning(null);
+    }
+  };
+
+  const handleScanAll = async () => {
+    setScanMsg(null);
+    setScanAllBusy(true);
+    try {
+      const resp = await runScan();
+      setScanMsg(resp.message);
+    } catch (e) {
+      setScanMsg(String(e));
+    } finally {
+      setScanAllBusy(false);
+    }
+  };
+
+  // ── HLS actions ────────────────────────────────────────────────────────
+
+  const handleStartHlsForAllMissing = async () => {
+    setHlsBusy(true);
+    setHlsMsg(null);
+    try {
+      const response = await createLibraryHlsBatch({ skip_existing: true, force: false, only_missing_hls: true });
+      setHlsMsg(response.message);
+      await loadHlsState();
+    } catch (e) {
+      setHlsMsg(String(e));
+    } finally {
+      setHlsBusy(false);
+    }
+  };
+
+  const handleCancelHlsBatch = async () => {
+    if (!hlsBatch) return;
+    setHlsCancelBusy(true);
+    try {
+      await cancelHlsBatch(hlsBatch.id);
+      await loadHlsState();
+      setHlsMsg("HLS batch cancellation requested.");
+    } catch (e) {
+      setHlsMsg(String(e));
+    } finally {
+      setHlsCancelBusy(false);
+    }
+  };
+
+  const handleRepairHls = async () => {
+    setHlsRepairBusy(true);
+    try {
+      const res = await repairStaleHls();
+      setHlsMsg(
+        `Repair complete: checked ${res.checked}, repaired ${res.db_repaired_to_completed}, invalidated ${res.stale_completed_invalidated}.`
+      );
+      await loadHlsState();
+    } catch (e) {
+      setHlsMsg(String(e));
+    } finally {
+      setHlsRepairBusy(false);
+    }
+  };
+
+  // ── Duplicates actions ─────────────────────────────────────────────────────────
+
+  const handleStartDuplicateScan = async () => {
+    setDuplicateBusy(true);
+    setDuplicateMsg(null);
+    try {
+      await startDuplicateScan();
+      await loadDuplicates();
+      setDuplicateMsg("Duplicate scan started.");
+    } catch (e) {
+      setDuplicateMsg(String(e));
+    } finally {
+      setDuplicateBusy(false);
+    }
+  };
+
+  const handleDeleteDuplicateVideo = async (videoId: number) => {
+    const ok = window.confirm("Delete this video from source and index?");
+    if (!ok) return;
+    try {
+      setDeletingVideoId(videoId);
+      await deleteVideo(videoId);
+      setSelectedDuplicateIds((prev) => {
+        const next = new Set(prev);
+        next.delete(videoId);
+        return next;
+      });
+      await loadDuplicates();
+      setDuplicateMsg("Video deleted.");
+    } catch (e) {
+      setDuplicateMsg(String(e));
+    } finally {
+      setDeletingVideoId(null);
+    }
+  };
+
+  const handleToggleDuplicateSelection = (videoId: number, selected: boolean) => {
+    setSelectedDuplicateIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(videoId);
+      else next.delete(videoId);
+      return next;
+    });
+  };
+
+  const handleToggleGroupSelection = (group: DuplicateGroup, selected: boolean) => {
+    setSelectedDuplicateIds((prev) => {
+      const next = new Set(prev);
+      for (const video of group.videos) {
+        if (selected) next.add(video.id);
+        else next.delete(video.id);
+      }
+      return next;
+    });
+  };
+
+  const handleDeleteSelectedDuplicates = async () => {
+    const selectedIds = Array.from(selectedDuplicateIds);
+    if (selectedIds.length === 0) return;
+    const ok = window.confirm(`Delete ${selectedIds.length} selected duplicate video(s) from source and index?`);
+    if (!ok) return;
+
+    setBulkDeleteBusy(true);
+    setDuplicateMsg(null);
+    const errors: string[] = [];
+    let deletedCount = 0;
+
+    try {
+      for (const videoId of selectedIds) {
+        try {
+          await deleteVideo(videoId);
+          deletedCount += 1;
+        } catch (e) {
+          errors.push(`ID ${videoId}: ${String(e)}`);
+        }
+      }
+      setSelectedDuplicateIds(new Set());
+      await loadDuplicates();
+      if (errors.length > 0) {
+        setDuplicateMsg(`Deleted ${deletedCount} video(s). ${errors.length} failed: ${errors.join("; ")}`);
+      } else {
+        setDuplicateMsg(`Deleted ${deletedCount} selected video(s).`);
+      }
+    } finally {
+      setBulkDeleteBusy(false);
+    }
+  };
+
+  const selectedDuplicateCount = selectedDuplicateIds.size;
+  const selectedDuplicateSize = duplicateGroups.reduce((sum, group) => {
+    return sum + group.videos.reduce((groupSum, video) => {
+      return selectedDuplicateIds.has(video.id) ? groupSum + video.size : groupSum;
+    }, 0);
+  }, 0);
+
+  // ── Playback compatibility actions ──────────────────────────────────────
+
+  const handleSetProfileStatus = async (profileId: number, status: ManualPlaybackStatus) => {
+    try {
+      setProfileBusyId(profileId);
+      await setMediaProfilePlaybackStatus(profileId, status);
+      await loadCompatibility();
+      setProfileMsg("Profile updated.");
+    } catch (e) {
+      setProfileMsg(String(e));
+    } finally {
+      setProfileBusyId(null);
+    }
+  };
+
+  const handleClearProfileStatus = async (profileId: number) => {
+    try {
+      setProfileBusyId(profileId);
+      await clearMediaProfilePlaybackStatus(profileId);
+      await loadCompatibility();
+      setProfileMsg("Manual override cleared.");
+    } catch (e) {
+      setProfileMsg(String(e));
+    } finally {
+      setProfileBusyId(null);
+    }
   };
 
   return (
-    <div className="settings-page">
-      {/* Header */}
+    <div className="settings-page settings-page-ops">
       <div className="settings-header">
         <button className="btn-back" onClick={() => navigate("/")}>← Library</button>
         <h1>Settings</h1>
       </div>
 
-      {/* Media Sources section */}
-      <section className="settings-section">
+      {error && <div className="settings-error">{error}</div>}
+
+      {/* Media Sources */}
+      <section className="settings-section" id="media-sources">
         <div className="settings-section-header">
           <div>
             <h2>Media Sources</h2>
             <p className="settings-section-desc">
-              Configure subfolders of <strong>/volume1</strong> that the scanner indexes for video files.
-              <br />
-              Browse <strong>/volume1</strong> and add subfolders — for example{" "}
-              <code>sclad/Movies</code> or <code>video/GoPro</code>.
-              <br />
-              The root <code>/volume1</code> itself is never scanned automatically.
+              Configure subfolders of <strong>/volume1</strong> for scanning.
             </p>
           </div>
-          <button className="btn-primary" onClick={openAdd}>+ Add Source</button>
+          <div className="settings-inline-actions">
+            <button className="btn-secondary" onClick={() => void handleScanAll()} disabled={scanAllBusy}>
+              {scanAllBusy ? "Starting..." : "Scan Library"}
+            </button>
+            <button className="btn-primary" onClick={openAdd}>+ Add Source</button>
+          </div>
         </div>
 
-        {scanMsg && (
-          <div className="settings-notice">
-            {scanMsg}{" "}
-            <button className="btn-link" onClick={() => setScanMsg(null)}>✕</button>
-          </div>
-        )}
-        {error && (
-          <div className="settings-error">
-            {error}{" "}
-            <button className="btn-link" onClick={() => setError(null)}>✕</button>
-          </div>
-        )}
+        {scanMsg && <div className="settings-notice">{scanMsg}</div>}
 
         {loading ? (
-          <div className="settings-loading">Loading…</div>
+          <div className="settings-loading">Loading...</div>
         ) : sources.length === 0 ? (
           <div className="settings-empty">
-            <p>No media sources configured.</p>
-            <p>
-              Browse <strong>/volume1</strong> and add subfolders to scan.
-              Use <strong>+ Add Source</strong> and click <strong>Browse /volume1</strong> to pick a folder.
-            </p>
-            <p className="form-hint">
-              Example: add <code>sclad/Movies</code> — the app will scan{" "}
-              <code>/media/sclad/Movies</code> (host: <code>/volume1/sclad/Movies</code>).
-            </p>
+            No media sources configured. Browse <strong>/volume1</strong> and add subfolders to scan.
           </div>
         ) : (
           <div className="settings-table-wrapper">
@@ -271,18 +603,13 @@ export function SettingsPage() {
               <tbody>
                 {sources.map((s) => (
                   <tr key={s.id} className={s.enabled ? "" : "row-disabled"}>
-                    <td className="col-name">{s.name}</td>
-                    <td className="col-path">
-                      <code title={`Container: ${s.path}`}>
-                        {s.display_path || s.path}
-                      </code>
-                    </td>
+                    <td>{s.name}</td>
+                    <td><code title={`Container: ${s.path}`}>{s.display_path || s.path}</code></td>
                     <td>{s.media_type}</td>
                     <td>
                       <button
                         className={`toggle-btn ${s.enabled ? "toggle-on" : "toggle-off"}`}
                         onClick={() => void handleToggleEnable(s)}
-                        title={s.enabled ? "Disable source" : "Enable source"}
                       >
                         {s.enabled ? "✓ On" : "Off"}
                       </button>
@@ -290,26 +617,18 @@ export function SettingsPage() {
                     <td>{s.recursive ? "Yes" : "No"}</td>
                     <td>{s.scan_priority}</td>
                     <td>{s.video_count}</td>
-                    <td className="col-date">{formatDate(s.last_scanned_at)}</td>
-                    <td>
-                      <StatusBadge status={s.last_scan_status} />
-                      {s.last_error && (
-                        <span className="error-hint" title={s.last_error}> ⚠</span>
-                      )}
-                    </td>
+                    <td>{formatDate(s.last_scanned_at)}</td>
+                    <td><StatusBadge status={s.last_scan_status} /></td>
                     <td className="col-actions">
                       <button className="btn-sm" onClick={() => openEdit(s)}>Edit</button>
                       <button
                         className="btn-sm btn-scan"
                         onClick={() => void handleScanSource(s)}
                         disabled={scanning === s.id || !s.enabled}
-                        title={!s.enabled ? "Enable source to scan" : "Start scan"}
                       >
-                        {scanning === s.id ? "…" : "Scan"}
+                        {scanning === s.id ? "..." : "Scan"}
                       </button>
-                      <button className="btn-sm btn-danger" onClick={() => setConfirmDelete(s)}>
-                        Delete
-                      </button>
+                      <button className="btn-sm btn-danger" onClick={() => setConfirmDelete(s)}>Delete</button>
                     </td>
                   </tr>
                 ))}
@@ -319,24 +638,250 @@ export function SettingsPage() {
         )}
       </section>
 
-      {/* Other settings sections */}
-      <section className="settings-section settings-section-future">
-        <h2>Maintenance</h2>
-        <p className="settings-section-desc">
-          Analyze and clean stale generated data: orphan HLS cache, thumbnails, duplicate records.
-          <br />
-          Original media files are <strong>never</strong> deleted by maintenance cleanup.
-        </p>
-        <button className="btn-secondary" onClick={() => navigate("/maintenance")}>
-          Open Maintenance →
-        </button>
+      {/* HLS / Streaming */}
+      <section className="settings-section" id="hls-streaming">
+        <div className="settings-section-header">
+          <div>
+            <h2>HLS / Streaming</h2>
+            <p className="settings-section-desc">
+              Start HLS generation for missing videos and repair stale HLS DB state.
+            </p>
+          </div>
+          <div className="settings-inline-actions">
+            <button className="btn-secondary" onClick={() => void handleRepairHls()} disabled={hlsRepairBusy}>
+              {hlsRepairBusy ? "Repairing..." : "Repair HLS State"}
+            </button>
+            <button className="btn-primary" onClick={() => void handleStartHlsForAllMissing()} disabled={hlsBusy}>
+              {hlsBusy ? "Starting..." : "Prepare HLS for all missing"}
+            </button>
+          </div>
+        </div>
+
+        {hlsMsg && <div className="settings-notice">{hlsMsg}</div>}
+
+        <div className="settings-kv-grid">
+          <div><strong>Running jobs:</strong> {hlsGlobal?.running ?? 0}</div>
+          <div><strong>Max concurrent:</strong> {hlsGlobal?.max_concurrent ?? 0}</div>
+          <div><strong>Queued jobs:</strong> {hlsGlobal?.queued_jobs ?? 0}</div>
+          <div><strong>Recent completed:</strong> {hlsGlobal?.recent_completed ?? 0}</div>
+          <div><strong>Recent failed:</strong> {hlsGlobal?.recent_failed ?? 0}</div>
+        </div>
+
+        {hlsBatch && (
+          <div className="settings-notice">
+            <strong>Active batch #{hlsBatch.id}</strong> - {hlsBatch.status} - {Math.round(hlsBatch.progress_percent)}%
+            {hlsBatch.current_video ? ` - current: ${hlsBatch.current_video.title}` : ""}
+            {(hlsBatch.status === "queued" || hlsBatch.status === "running") && (
+              <button className="btn-danger btn-sm" style={{ marginLeft: 8 }} onClick={() => void handleCancelHlsBatch()} disabled={hlsCancelBusy}>
+                {hlsCancelBusy ? "Stopping..." : "Stop batch"}
+              </button>
+            )}
+          </div>
+        )}
       </section>
 
-      <section className="settings-section settings-section-future">
-        <h2>More Settings — Coming Soon</h2>
-        <p className="settings-section-desc">
-          Planned: Scan settings, HLS settings, Thumbnail settings, Cache settings.
-        </p>
+      {/* Duplicates */}
+      <section className="settings-section" id="duplicates">
+        <div className="settings-section-header">
+          <div>
+            <h2>Duplicates</h2>
+            <p className="settings-section-desc">
+              Run duplicate scan, review candidate groups, and delete selected duplicate files.
+            </p>
+          </div>
+          <button className="btn-primary" onClick={() => void handleStartDuplicateScan()} disabled={duplicateBusy || duplicateStatus?.status === "running"}>
+            {duplicateBusy || duplicateStatus?.status === "running" ? "Scanning..." : "Scan Duplicates"}
+          </button>
+        </div>
+
+        {duplicateMsg && <div className="settings-notice">{duplicateMsg}</div>}
+
+        <div className="settings-kv-grid">
+          <div><strong>Status:</strong> {duplicateStatus?.status ?? "idle"}</div>
+          <div><strong>Groups:</strong> {duplicateSummary?.candidate_groups_found ?? 0}</div>
+          <div><strong>Candidates:</strong> {duplicateSummary?.duplicate_candidates_found ?? 0}</div>
+          <div><strong>Potential saving:</strong> {fmtBytes(duplicateSummary?.potential_saving ?? 0)}</div>
+        </div>
+
+        {duplicateLoading ? (
+          <div className="settings-loading">Loading duplicate groups...</div>
+        ) : duplicateGroups.length === 0 ? (
+          <div className="settings-empty">No duplicate groups yet.</div>
+        ) : (
+          <div className="duplicate-groups">
+            <div className="duplicates-bulk-actions">
+              <div className="duplicates-selected-stats">
+                <strong>Selected:</strong> {selectedDuplicateCount} file(s), {fmtBytes(selectedDuplicateSize)}
+              </div>
+              <div className="duplicates-bulk-buttons">
+                <button className="btn-secondary" onClick={() => setSelectedDuplicateIds(new Set())} disabled={selectedDuplicateCount === 0 || bulkDeleteBusy}>
+                  Clear selection
+                </button>
+                <button className="btn-danger" onClick={() => void handleDeleteSelectedDuplicates()} disabled={selectedDuplicateCount === 0 || bulkDeleteBusy}>
+                  {bulkDeleteBusy ? "Deleting..." : "Delete selected"}
+                </button>
+              </div>
+            </div>
+
+            {duplicateGroups.map((group, index) => (
+              <section key={group.group_id} className="duplicate-group-card">
+                <div className="duplicate-group-header">
+                  <div>
+                    <h3>Group {index + 1}</h3>
+                    <p className="duplicate-reason">{group.reason}</p>
+                  </div>
+                  <label className="form-label form-label-inline" style={{ margin: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={group.videos.every((video) => selectedDuplicateIds.has(video.id))}
+                      onChange={(e) => handleToggleGroupSelection(group, e.target.checked)}
+                    />
+                    Select group
+                  </label>
+                  <span className={`duplicate-confidence badge-${group.confidence}`}>{confidenceLabel(group.confidence)}</span>
+                </div>
+
+                <div className="duplicate-fingerprint-grid">
+                  <div><strong>Count:</strong> {group.candidate_count}</div>
+                  <div><strong>Total size:</strong> {fmtBytes(group.total_size)}</div>
+                  <div><strong>Potential saving:</strong> {fmtBytes(group.potential_saving)}</div>
+                  <div>
+                    <strong>Libraries:</strong>{" "}
+                    {Array.from(new Set(group.videos.map((video) => duplicateLibraryLabel(video)))).join(", ")}
+                  </div>
+                </div>
+
+                <div className="duplicate-video-list">
+                  {group.videos.map((video) => (
+                    <article key={video.id} className="duplicate-video-item">
+                      <label className="duplicate-video-select" title="Select duplicate for bulk delete">
+                        <input
+                          type="checkbox"
+                          checked={selectedDuplicateIds.has(video.id)}
+                          onChange={(e) => handleToggleDuplicateSelection(video.id, e.target.checked)}
+                        />
+                      </label>
+                      <div className="duplicate-video-thumb">
+                        {video.thumbnail_url ? <img src={video.thumbnail_url} alt={video.title} loading="lazy" /> : <div className="thumb placeholder">No Thumbnail</div>}
+                      </div>
+                      <div className="duplicate-video-body">
+                        <a href={video.watch_url} target="_blank" rel="noopener noreferrer" className="duplicate-video-link">
+                          {video.title}
+                        </a>
+                        <p><strong>Library:</strong> {duplicateLibraryLabel(video)}</p>
+                        <p>{video.relative_path}</p>
+                        <p>{fmtBytes(video.size)}</p>
+                        <button className="btn-danger duplicate-delete-btn" onClick={() => void handleDeleteDuplicateVideo(video.id)} disabled={deletingVideoId === video.id || bulkDeleteBusy}>
+                          {deletingVideoId === video.id ? "Deleting..." : "Delete this video"}
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Playback Compatibility */}
+      <section className="settings-section" id="playback-compatibility">
+        <div className="settings-section-header">
+          <div>
+            <h2>Playback Compatibility</h2>
+            <p className="settings-section-desc">
+              Review media profiles and mark what plays correctly in your browser/devices.
+            </p>
+          </div>
+          <button className="btn-secondary" onClick={() => void loadCompatibility()}>Refresh</button>
+        </div>
+
+        {profileMsg && <div className="settings-notice">{profileMsg}</div>}
+
+        {mediaProfiles.length === 0 ? (
+          <div className="settings-empty">No media profiles yet. Scan the library first.</div>
+        ) : (
+          <div className="settings-table-wrapper">
+            <table className="settings-table">
+              <thead>
+                <tr>
+                  <th>Extension</th>
+                  <th>Video / Audio</th>
+                  <th>Files</th>
+                  <th>Auto</th>
+                  <th>Manual</th>
+                  <th>Effective</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mediaProfiles.map((profile) => (
+                  <tr key={profile.id}>
+                    <td>{profile.extension}</td>
+                    <td>{profile.video_codec} / {profile.audio_codec}</td>
+                    <td>{profile.files_count}</td>
+                    <td>{profile.auto_compatibility_status}</td>
+                    <td>{profile.manual_playback_status ?? "—"}</td>
+                    <td>{profile.effective_compatibility_status}</td>
+                    <td className="col-actions">
+                      <button className="btn-sm" disabled={profileBusyId === profile.id} onClick={() => void handleSetProfileStatus(profile.id, "playable")}>Playable</button>
+                      <button className="btn-sm" disabled={profileBusyId === profile.id} onClick={() => void handleSetProfileStatus(profile.id, "partially_playable")}>Partial</button>
+                      <button className="btn-sm" disabled={profileBusyId === profile.id} onClick={() => void handleSetProfileStatus(profile.id, "not_playable")}>Not playable</button>
+                      <button className="btn-sm btn-secondary" disabled={profileBusyId === profile.id} onClick={() => void handleClearProfileStatus(profile.id)}>Clear</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Maintenance */}
+      <section className="settings-section" id="maintenance">
+        <div className="settings-section-header">
+          <div>
+            <h2>Maintenance</h2>
+            <p className="settings-section-desc">
+              Cleanup stale generated data and repair state mismatches.
+            </p>
+          </div>
+          <button className="btn-secondary" onClick={() => navigate("/maintenance")}>Open Maintenance →</button>
+        </div>
+      </section>
+
+      {/* System */}
+      <section className="settings-section" id="system-runtime">
+        <div className="settings-section-header">
+          <div>
+            <h2>System / Runtime</h2>
+            <p className="settings-section-desc">Container runtime paths and health status.</p>
+          </div>
+          <button className="btn-secondary" onClick={() => void loadSystem()}>Refresh</button>
+        </div>
+
+        {!health ? (
+          <div className="settings-loading">Loading...</div>
+        ) : (
+          <>
+            <div className="settings-kv-grid"><div><strong>Health:</strong> {health.status}</div></div>
+            <div className="settings-table-wrapper">
+              <table className="settings-table">
+                <thead>
+                  <tr><th>Runtime key</th><th>Path</th></tr>
+                </thead>
+                <tbody>
+                  {Object.entries(health.runtime_dirs).map(([key, value]) => (
+                    <tr key={key}>
+                      <td>{key}</td>
+                      <td><code>{value}</code></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </section>
 
       {/* Add / Edit modal */}
@@ -358,7 +903,7 @@ export function SettingsPage() {
                   type="text"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. GoPro, Family, Movies"
+                  placeholder="e.g. Movies"
                 />
               </label>
 
@@ -376,46 +921,21 @@ export function SettingsPage() {
                     }}
                     placeholder="/media/sclad/Movies"
                   />
-                  <button
-                    className="btn-secondary btn-sm"
-                    onClick={() => void openBrowse()}
-                    type="button"
-                  >
-                    Browse /volume1
-                  </button>
-                  <button
-                    className="btn-secondary btn-sm"
-                    onClick={() => void handleValidate()}
-                    disabled={validating}
-                    type="button"
-                  >
-                    {validating ? "…" : "Validate"}
+                  <button className="btn-secondary btn-sm" onClick={() => void openBrowse()} type="button">Browse /volume1</button>
+                  <button className="btn-secondary btn-sm" onClick={() => void handleValidate()} disabled={validating} type="button">
+                    {validating ? "..." : "Validate"}
                   </button>
                 </div>
                 <span className="form-hint">
-                  Select a subfolder of <code>/volume1</code> using <strong>Browse /volume1</strong>,
-                  or enter the container path directly (e.g. <code>/media/sclad/Movies</code>).
-                  The root <code>/volume1</code> itself cannot be added as a source.
+                  Select folders relative to /volume1. Example: sclad/Movies. The mounted root /volume1 itself is not scanned.
                 </span>
               </label>
 
               {validation && (
                 <div className={`validation-result ${validation.valid ? "validation-ok" : "validation-fail"}`}>
-                  {validation.valid ? "✓ " : "✗ "}
-                  {validation.message}
+                  {validation.valid ? "✓ " : "✗ "}{validation.message}
                 </div>
               )}
-
-              <label className="form-label">
-                Media type
-                <select
-                  className="form-input"
-                  value={form.media_type ?? "video"}
-                  onChange={(e) => setForm((f) => ({ ...f, media_type: e.target.value }))}
-                >
-                  <option value="video">Video</option>
-                </select>
-              </label>
 
               <label className="form-label form-label-inline">
                 <input
@@ -432,29 +952,13 @@ export function SettingsPage() {
                   checked={form.recursive ?? true}
                   onChange={(e) => setForm((f) => ({ ...f, recursive: e.target.checked }))}
                 />
-                Recursive (scan sub-folders)
-              </label>
-
-              <label className="form-label">
-                Scan priority (lower = scanned first)
-                <input
-                  className="form-input"
-                  type="number"
-                  min={1}
-                  max={9999}
-                  value={form.scan_priority ?? 100}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, scan_priority: parseInt(e.target.value, 10) || 100 }))
-                  }
-                />
+                Recursive
               </label>
             </div>
 
             <div className="modal-footer">
               <button className="btn-secondary" onClick={closeModal} disabled={saving}>Cancel</button>
-              <button className="btn-primary" onClick={() => void handleSave()} disabled={saving}>
-                {saving ? "Saving…" : "Save"}
-              </button>
+              <button className="btn-primary" onClick={() => void handleSave()} disabled={saving}>{saving ? "Saving..." : "Save"}</button>
             </div>
           </div>
         </div>
@@ -469,12 +973,8 @@ export function SettingsPage() {
               <button className="modal-close" onClick={() => setBrowseOpen(false)}>✕</button>
             </div>
             <div className="modal-body">
-              {/* Breadcrumb */}
               <div className="browse-breadcrumb">
-                <span
-                  className="browse-breadcrumb-item browse-breadcrumb-link"
-                  onClick={() => void loadBrowse("").then(() => setBrowsePath(""))}
-                >
+                <span className="browse-breadcrumb-item browse-breadcrumb-link" onClick={() => void loadBrowse("").then(() => setBrowsePath(""))}>
                   /volume1
                 </span>
                 {browsePath.split("/").filter(Boolean).map((part, i, arr) => {
@@ -482,10 +982,7 @@ export function SettingsPage() {
                   return (
                     <span key={partial}>
                       {" / "}
-                      <span
-                        className="browse-breadcrumb-item browse-breadcrumb-link"
-                        onClick={() => void loadBrowse(partial).then(() => setBrowsePath(partial))}
-                      >
+                      <span className="browse-breadcrumb-item browse-breadcrumb-link" onClick={() => void loadBrowse(partial).then(() => setBrowsePath(partial))}>
                         {part}
                       </span>
                     </span>
@@ -493,55 +990,30 @@ export function SettingsPage() {
                 })}
               </div>
 
-              {browsePath && (
-                <button className="btn-sm browse-up-btn" onClick={() => void handleBrowseUp()}>
-                  ↑ Up
-                </button>
-              )}
-
-              {browseLoading && <div className="settings-loading">Loading…</div>}
+              {browsePath && <button className="btn-sm browse-up-btn" onClick={() => void handleBrowseUp()}>↑ Up</button>}
+              {browseLoading && <div className="settings-loading">Loading...</div>}
               {browseError && <div className="settings-error">{browseError}</div>}
 
-              {!browseLoading && !browseError && browseItems.length === 0 && (
-                <div className="settings-empty">No subfolders found here.</div>
-              )}
+              {!browseLoading && !browseError && browseItems.length === 0 && <div className="settings-empty">No subfolders found.</div>}
 
               {!browseLoading && browseItems.length > 0 && (
                 <ul className="browse-list">
                   {browseItems.map((item) => (
-                    <li
-                      key={item.relative_path}
-                      className={`browse-item${item.blocked ? " browse-item-blocked" : item.already_added ? " browse-item-added" : ""}`}
-                    >
-                      <span
-                        className="browse-item-name"
-                        onClick={() => !item.blocked && void handleBrowseNavigate(item)}
-                        title={item.blocked ? "Blocked (infrastructure)" : item.display_path}
-                      >
+                    <li key={item.relative_path} className={`browse-item${item.blocked ? " browse-item-blocked" : item.already_added ? " browse-item-added" : ""}`}>
+                      <span className="browse-item-name" onClick={() => !item.blocked && void handleBrowseNavigate(item)} title={item.blocked ? "Blocked" : item.display_path}>
                         📁 {item.name}
                         {item.blocked && <span className="browse-blocked-label"> (blocked)</span>}
-                        {item.already_added && !item.blocked && (
-                          <span className="browse-added-label"> (already added)</span>
-                        )}
+                        {item.already_added && !item.blocked && <span className="browse-added-label"> (already added)</span>}
                       </span>
                       {!item.blocked && (
-                        <button
-                          className="btn-sm"
-                          onClick={() => handleBrowseSelect(item)}
-                          disabled={item.already_added}
-                          title={item.already_added ? "Already a media source" : `Select ${item.display_path}`}
-                        >
-                          Select
-                        </button>
+                        <button className="btn-sm" onClick={() => handleBrowseSelect(item)} disabled={item.already_added}>Select</button>
                       )}
                     </li>
                   ))}
                 </ul>
               )}
             </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setBrowseOpen(false)}>Close</button>
-            </div>
+            <div className="modal-footer"><button className="btn-secondary" onClick={() => setBrowseOpen(false)}>Close</button></div>
           </div>
         </div>
       )}
@@ -557,20 +1029,10 @@ export function SettingsPage() {
             <div className="modal-body">
               <p>Remove <strong>{confirmDelete.name}</strong> (<code>{confirmDelete.display_path || confirmDelete.path}</code>)?</p>
               <p className="form-hint"><strong>Original media files will NOT be deleted.</strong></p>
-              <p className="form-hint">
-                {confirmDelete.video_count} video(s) from this source will be hidden from the normal
-                library and marked as <em>source_removed</em>. They remain in the database.
-              </p>
-              <p className="form-hint">
-                Generated HLS cache is preserved. Use <strong>Settings → Maintenance</strong> to clean
-                it up later if needed.
-              </p>
             </div>
             <div className="modal-footer">
               <button className="btn-secondary" onClick={() => setConfirmDelete(null)}>Cancel</button>
-              <button className="btn-danger" onClick={() => void handleDelete(confirmDelete)}>
-                Remove Source
-              </button>
+              <button className="btn-danger" onClick={() => void handleDelete(confirmDelete)}>Remove Source</button>
             </div>
           </div>
         </div>

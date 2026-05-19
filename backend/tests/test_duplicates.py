@@ -26,6 +26,7 @@ def _insert_video(
     video_codec: str | None = "h264",
     audio_codec: str | None = "aac",
     extension: str = ".mp4",
+    library_root_id: int | None = None,
 ) -> int:
     from app.database import SessionLocal
     from app.models import Video
@@ -49,6 +50,7 @@ def _insert_video(
         compatibility_reason="test",
         indexed_at=datetime.now(timezone.utc),
         created_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        library_root_id=library_root_id,
     )
     db.add(video)
     db.commit()
@@ -221,11 +223,58 @@ def test_duplicates_groups_response_shape_and_no_absolute_paths(tmp_path: Path) 
     assert group["fingerprint"]["mode"] == "strict"
     assert len(group["videos"]) == 2
     for video in group["videos"]:
+        assert "library_root_id" in video
+        assert "library_root_name" in video
         assert video["relative_path"].startswith(("Family/", "Backup/"))
         assert "/volume1/" not in video["relative_path"]
         assert video["watch_url"].startswith("/watch/")
         if video["thumbnail_url"] is not None:
             assert video["thumbnail_url"].startswith("/api/videos/")
+
+
+def test_duplicates_groups_include_library_root_name_when_available(tmp_path: Path) -> None:
+    _reset_duplicate_state()
+    setup_test_db(tmp_path)
+
+    from app.database import SessionLocal
+    from app.models import LibraryRoot
+    from app.services.duplicate_service import load_duplicate_groups, run_duplicate_scan
+
+    db = SessionLocal()
+    source = LibraryRoot(name="Movies", path="/media/movies", media_type="video", enabled=True, recursive=True, scan_priority=100)
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    source_id = source.id
+
+    _insert_video(
+        tmp_path=tmp_path,
+        title="D1",
+        relative_path="Dups/d1.mp4",
+        size=5000,
+        duration=100,
+        width=1920,
+        height=1080,
+        library_root_id=source_id,
+    )
+    _insert_video(
+        tmp_path=tmp_path,
+        title="D2",
+        relative_path="Dups/d2.mp4",
+        size=5000,
+        duration=100,
+        width=1920,
+        height=1080,
+    )
+
+    run_duplicate_scan(db, mode="strict")
+    groups = load_duplicate_groups(db, mode="strict")
+    db.close()
+
+    assert len(groups) == 1
+    videos = groups[0]["videos"]
+    with_library = next(v for v in videos if v["library_root_id"] == source_id)
+    assert with_library["library_root_name"] == "Movies"
 
 
 def test_duplicates_summary_empty_before_scan(tmp_path: Path) -> None:

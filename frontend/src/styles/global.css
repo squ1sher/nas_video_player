@@ -27,10 +27,15 @@ button {
   max-width: 1280px;
   margin: 0 auto;
   padding: 20px;
+  padding-bottom: 110px;
 }
 
 .watch-page {
   max-width: 1100px;
+}
+
+.settings-page {
+  padding-bottom: 110px;
 }
 
 .page-header {
@@ -280,6 +285,101 @@ button {
 .browse-blocked-label { color: #ff8888; font-size: 11px; }
 .browse-added-label { color: #888; font-size: 11px; }
 
+/* ── Compact library page ── */
+.page-library-compact {
+  padding-bottom: 110px;
+}
+
+.library-compact-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.library-title-mini {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.lib-tabs-compact {
+  margin: 0;
+}
+
+.library-controls-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.library-controls-compact .search-input {
+  width: min(260px, 56vw);
+}
+
+.folder-source-section {
+  margin-bottom: 18px;
+}
+
+.folder-source-title {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+}
+
+/* ── Global bottom process bar ── */
+.global-status-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(17, 17, 17, 0.95);
+  border-top: 1px solid #2d2d2d;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.global-status-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 8px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.global-status-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+/* ── Settings operation sections ── */
+.settings-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-kv-grid > div {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 13px;
+}
+
 .scan-spinner {
   display: inline-block;
   width: 12px;
@@ -350,9 +450,9 @@ button {
 /* ── Video grid ── */
 .video-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 16px;
-  margin-top: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .video-group-list {
@@ -434,6 +534,58 @@ button {
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
+}
+
+.video-card-minimal .thumb-title-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 22px 10px 8px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.78) 100%);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.video-card-minimal:hover .thumb-title-overlay,
+.video-card-minimal:focus-visible .thumb-title-overlay,
+.video-card-minimal:focus-within .thumb-title-overlay {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.thumb-title-text {
+  display: block;
+  color: #f0f0f0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (hover: none) {
+  .video-card-minimal .thumb-title-overlay {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.library-load-more-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.library-load-more-count,
+.library-load-more-done {
+  color: #9aa6b2;
+  font-size: 13px;
 }
 
 /* ── Progress bar on card ── */

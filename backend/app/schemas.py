@@ -56,6 +56,8 @@ class ScanStatusOut(BaseModel):
 
 class VideoListItem(BaseModel):
     id: int
+    library_root_id: int | None = None
+    library_root_name: str | None = None
     title: str
     filename: str
     extension: str
@@ -94,6 +96,8 @@ class VideoListItem(BaseModel):
 
 class VideoDetail(BaseModel):
     id: int
+    library_root_id: int | None = None
+    library_root_name: str | None = None
     title: str
     filename: str
     relative_path: str
@@ -277,6 +281,8 @@ class DuplicateFingerprintOut(BaseModel):
 
 class DuplicateGroupVideoOut(BaseModel):
     id: int
+    library_root_id: int | None = None
+    library_root_name: str | None = None
     title: str
     filename: str
     relative_path: str
