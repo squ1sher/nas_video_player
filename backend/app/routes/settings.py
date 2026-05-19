@@ -1,5 +1,7 @@
 """Application settings routes – Phase 2.5: configurable Media Sources."""
 
+from pathlib import Path
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -11,13 +13,45 @@ from app.schemas import (
     LibraryRootIn,
     LibraryRootOut,
     LibraryRootUpdate,
+    MediaSourceBrowseItem,
     PathValidationRequest,
     PathValidationResult,
     ScanStartedResponse,
 )
-from app.services.library_root_service import bootstrap_library_roots, validate_media_source_path
+from app.services.library_root_service import (
+    browse_media_sources,
+    path_to_display,
+    path_to_relative,
+    validate_media_source_path,
+)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+
+def _enrich_root_out(
+    root: LibraryRoot,
+    video_count: int,
+    settings: Settings,
+) -> LibraryRootOut:
+    """Build a LibraryRootOut with computed relative_path and display_path."""
+    p = Path(root.path)
+    return LibraryRootOut(
+        id=root.id,
+        name=root.name,
+        path=root.path,
+        relative_path=path_to_relative(p, settings),
+        display_path=path_to_display(p, settings),
+        media_type=root.media_type,
+        enabled=root.enabled,
+        recursive=root.recursive,
+        scan_priority=root.scan_priority,
+        last_scanned_at=root.last_scanned_at,
+        last_scan_status=root.last_scan_status,
+        last_error=root.last_error,
+        created_at=root.created_at,
+        updated_at=root.updated_at,
+        video_count=video_count,
+    )
 
 
 # ── Media Sources CRUD ─────────────────────────────────────────────────────
@@ -26,36 +60,46 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 @router.get("/media-sources", response_model=list[LibraryRootOut])
 def list_media_sources(
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> list[LibraryRootOut]:
-    """Return all configured media sources."""
-    if db.query(LibraryRoot).count() == 0:
-        bootstrap_library_roots(db, get_settings())
+    """Return all configured media sources.  Never auto-creates a default source."""
     roots = (
         db.query(LibraryRoot)
         .order_by(LibraryRoot.scan_priority.asc(), LibraryRoot.name.asc())
         .all()
     )
-    result = []
-    for root in roots:
-        video_count = db.query(Video).filter(Video.library_root_id == root.id).count()
-        result.append(
-            LibraryRootOut(
-                id=root.id,
-                name=root.name,
-                path=root.path,
-                media_type=root.media_type,
-                enabled=root.enabled,
-                recursive=root.recursive,
-                scan_priority=root.scan_priority,
-                last_scanned_at=root.last_scanned_at,
-                last_scan_status=root.last_scan_status,
-                last_error=root.last_error,
-                created_at=root.created_at,
-                updated_at=root.updated_at,
-                video_count=video_count,
-            )
+    return [
+        _enrich_root_out(root, db.query(Video).filter(Video.library_root_id == root.id).count(), settings)
+        for root in roots
+    ]
+
+
+# ── Browse endpoint (must be defined before /{source_id} to avoid conflict) ──
+
+@router.get("/media-sources/browse", response_model=list[MediaSourceBrowseItem])
+def browse_directories(
+    relative_path: str = "",
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+) -> list[MediaSourceBrowseItem]:
+    """List directories under the media root (or a sub-path of it).
+
+    Pass ``relative_path=sclad`` to browse inside /media/sclad.
+    The root itself (/media) is browseable but cannot be added as a source.
+    """
+    entries = browse_media_sources(relative_path, settings, db)
+    return [
+        MediaSourceBrowseItem(
+            name=e.name,
+            relative_path=e.relative_path,
+            internal_path=e.internal_path,
+            display_path=e.display_path,
+            is_directory=e.is_directory,
+            already_added=e.already_added,
+            blocked=e.blocked,
         )
-    return result
+        for e in entries
+    ]
 
 
 @router.post("/media-sources/validate", response_model=PathValidationResult)
@@ -74,7 +118,6 @@ def create_media_source(
     settings: Settings = Depends(get_settings),
 ) -> LibraryRootOut:
     """Add a new media source."""
-    # Validate path
     validation = validate_media_source_path(body.path, settings)
     if not validation.valid:
         raise HTTPException(
@@ -83,7 +126,6 @@ def create_media_source(
         )
     normalized_path = validation.path or body.path
 
-    # Check for duplicate path
     existing = db.query(LibraryRoot).filter(LibraryRoot.path == normalized_path).first()
     if existing:
         raise HTTPException(
@@ -102,46 +144,21 @@ def create_media_source(
     db.add(root)
     db.commit()
     db.refresh(root)
-
-    return LibraryRootOut(
-        id=root.id,
-        name=root.name,
-        path=root.path,
-        media_type=root.media_type,
-        enabled=root.enabled,
-        recursive=root.recursive,
-        scan_priority=root.scan_priority,
-        last_scanned_at=root.last_scanned_at,
-        last_scan_status=root.last_scan_status,
-        last_error=root.last_error,
-        created_at=root.created_at,
-        updated_at=root.updated_at,
-        video_count=0,
-    )
+    return _enrich_root_out(root, 0, settings)
 
 
 @router.get("/media-sources/{source_id}", response_model=LibraryRootOut)
-def get_media_source(source_id: int, db: Session = Depends(get_db)) -> LibraryRootOut:
+def get_media_source(
+    source_id: int,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> LibraryRootOut:
     """Get a single media source by ID."""
     root = db.query(LibraryRoot).filter(LibraryRoot.id == source_id).first()
     if not root:
         raise HTTPException(status_code=404, detail="Media source not found.")
     video_count = db.query(Video).filter(Video.library_root_id == root.id).count()
-    return LibraryRootOut(
-        id=root.id,
-        name=root.name,
-        path=root.path,
-        media_type=root.media_type,
-        enabled=root.enabled,
-        recursive=root.recursive,
-        scan_priority=root.scan_priority,
-        last_scanned_at=root.last_scanned_at,
-        last_scan_status=root.last_scan_status,
-        last_error=root.last_error,
-        created_at=root.created_at,
-        updated_at=root.updated_at,
-        video_count=video_count,
-    )
+    return _enrich_root_out(root, video_count, settings)
 
 
 @router.put("/media-sources/{source_id}", response_model=LibraryRootOut)
@@ -156,7 +173,6 @@ def update_media_source(
     if not root:
         raise HTTPException(status_code=404, detail="Media source not found.")
 
-    # Validate new path if provided and different
     if body.path is not None and body.path != root.path:
         validation = validate_media_source_path(body.path, settings)
         if not validation.valid:
@@ -165,7 +181,6 @@ def update_media_source(
                 detail={"code": validation.code, "message": validation.message},
             )
         normalized_path = validation.path or body.path
-        # Check duplicate path
         conflict = db.query(LibraryRoot).filter(
             LibraryRoot.path == normalized_path,
             LibraryRoot.id != source_id,
@@ -191,21 +206,7 @@ def update_media_source(
     db.commit()
     db.refresh(root)
     video_count = db.query(Video).filter(Video.library_root_id == root.id).count()
-    return LibraryRootOut(
-        id=root.id,
-        name=root.name,
-        path=root.path,
-        media_type=root.media_type,
-        enabled=root.enabled,
-        recursive=root.recursive,
-        scan_priority=root.scan_priority,
-        last_scanned_at=root.last_scanned_at,
-        last_scan_status=root.last_scan_status,
-        last_error=root.last_error,
-        created_at=root.created_at,
-        updated_at=root.updated_at,
-        video_count=video_count,
-    )
+    return _enrich_root_out(root, video_count, settings)
 
 
 @router.delete("/media-sources/{source_id}")
@@ -222,8 +223,6 @@ def delete_media_source(source_id: int, db: Session = Depends(get_db)) -> dict:
 
     video_count = db.query(Video).filter(Video.library_root_id == root.id).count()
 
-    # Mark videos as source_removed and detach from root
-    # They are hidden from normal library but HLS/files are preserved
     db.query(Video).filter(Video.library_root_id == root.id).update(
         {"library_root_id": None, "availability_status": "source_removed"},
         synchronize_session=False,
@@ -249,10 +248,7 @@ def scan_single_source(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> ScanStartedResponse:
-    """
-    Start a full library scan (including this source).
-    Scans all enabled sources – per-source isolation is planned for a future release.
-    """
+    """Start a full library scan (including this source)."""
     root = db.query(LibraryRoot).filter(LibraryRoot.id == source_id).first()
     if not root:
         raise HTTPException(status_code=404, detail="Media source not found.")
@@ -274,4 +270,3 @@ def scan_single_source(
         status="started",
         message=f"Scan started for all enabled sources (including '{root.name}').",
     )
-

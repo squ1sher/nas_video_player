@@ -410,6 +410,8 @@ export type LibraryRoot = {
   id: number;
   name: string;
   path: string;
+  relative_path: string;   // e.g. "sclad/Movies"
+  display_path: string;    // e.g. "/volume1/sclad/Movies"
   media_type: string;
   enabled: boolean;
   recursive: boolean;
@@ -438,6 +440,16 @@ export type PathValidationResult = {
   path?: string;
   code?: string;
   message: string;
+};
+
+export type MediaSourceBrowseItem = {
+  name: string;
+  relative_path: string;   // e.g. "sclad/Movies"
+  internal_path: string;   // e.g. "/media/sclad/Movies"
+  display_path: string;    // e.g. "/volume1/sclad/Movies"
+  is_directory: boolean;
+  already_added: boolean;
+  blocked: boolean;
 };
 
 // ── Maintenance / Cleanup types ────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -9,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    video_library_path: Path = Field(default=Path("/media/library"), validation_alias="VIDEO_LIBRARY_PATH")
+    video_library_path: Path = Field(default=Path("/media"), validation_alias="VIDEO_LIBRARY_PATH")
     database_path: Path = Field(default=Path("/app/data/app.db"), validation_alias="DATABASE_PATH")
     thumbnails_path: Path = Field(default=Path("/app/thumbnails"), validation_alias="THUMBNAILS_PATH")
     cache_path: Path = Field(default=Path("/app/cache"), validation_alias="CACHE_PATH")
@@ -43,24 +44,38 @@ class Settings(BaseSettings):
     # ── Multi-root / library sources settings ────────────────────────────────
     # Comma-separated allowed base paths for media sources (security restriction).
     # If empty (default), any path is accepted. Set this in production for safety.
-    # Example: ALLOWED_MEDIA_ROOT_BASES=/media/library,/media/videos
+    # Example: ALLOWED_MEDIA_ROOT_BASES=/media,/media/videos
     allowed_media_root_bases: str = Field(
         default="",
         validation_alias="ALLOWED_MEDIA_ROOT_BASES",
     )
     # Comma-separated container paths to initialise as library roots on first run.
-    # Example: /media/library/video,/media/library/gopro,/media/library/family
+    # Example: /media/sclad/video,/media/sclad/gopro,/media/sclad/family
     media_library_roots: str = Field(default="", validation_alias="MEDIA_LIBRARY_ROOTS")
     # JSON alternative (preferred if both are set).
-    # Example: [{"name":"GoPro","path":"/media/library/gopro"},{"name":"Family","path":"/media/library/family"}]
+    # Example: [{"name":"GoPro","path":"/media/sclad/gopro"},{"name":"Family","path":"/media/sclad/family"}]
     media_library_roots_json: str = Field(default="", validation_alias="MEDIA_LIBRARY_ROOTS_JSON")
 
+    @staticmethod
+    def _ensure_writable_dir(path: Path, label: str) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+        probe_path = path / f".write-probe-{os.getpid()}"
+        try:
+            probe_path.write_text("ok", encoding="utf-8")
+        except OSError as exc:
+            raise RuntimeError(f"Runtime directory is not writable for {label}: {path}") from exc
+        finally:
+            try:
+                probe_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
     def ensure_runtime_dirs(self) -> None:
-        self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        self.thumbnails_path.mkdir(parents=True, exist_ok=True)
-        self.cache_path.mkdir(parents=True, exist_ok=True)
-        self.hls_output_path.mkdir(parents=True, exist_ok=True)
-        self.logs_path.mkdir(parents=True, exist_ok=True)
+        self._ensure_writable_dir(self.database_path.parent, "database")
+        self._ensure_writable_dir(self.thumbnails_path, "thumbnails")
+        self._ensure_writable_dir(self.cache_path, "cache")
+        self._ensure_writable_dir(self.hls_output_path, "hls")
+        self._ensure_writable_dir(self.logs_path, "logs")
 
     @property
     def excluded_extensions_set(self) -> set[str]:

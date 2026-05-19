@@ -20,7 +20,11 @@ from app.scan_status import (
     update_current_root,
     update_roots_info,
 )
-from app.services.library_root_service import bootstrap_library_roots, get_enabled_library_roots
+from app.services.library_root_service import (
+    bootstrap_library_roots,
+    clean_up_invalid_default_source,
+    get_enabled_library_roots,
+)
 from app.services.media_profile_service import (
     assign_profile_to_video,
     build_media_profile_fields,
@@ -202,15 +206,24 @@ def _compute_folder_path(file_path: Path, root: Path) -> str:
 
 
 def initialize_library_roots(db: Session, settings: Settings) -> None:
-    """Ensure library_roots has at least one entry. Called at application startup."""
+    """Remove legacy invalid default sources, then bootstrap from env vars if configured.
+
+    Does NOT auto-create a 'Default' source from VIDEO_LIBRARY_PATH.
+    Sources must be configured explicitly via MEDIA_LIBRARY_ROOTS/JSON or the web UI.
+    """
+    clean_up_invalid_default_source(db, settings)
     if db.query(LibraryRoot).count() > 0:
         return
-    logger.info("No library roots found at startup – initialising defaults from environment.")
     bootstrap_library_roots(db, settings)
+    if db.query(LibraryRoot).count() == 0:
+        logger.info(
+            "No media sources configured. "
+            "Add subfolders via Settings → Media Sources in the web UI."
+        )
 
 
 def _create_roots_from_config(db: Session, settings: Settings) -> list[LibraryRoot]:
-    """Backward-compatible wrapper around the shared library root bootstrap logic."""
+    """Backward-compatible wrapper kept for any direct test usage.  Calls bootstrap_library_roots."""
     return bootstrap_library_roots(db, settings)
 
 
@@ -554,8 +567,11 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
     result.total_roots = len(enabled_roots)
 
     if not enabled_roots:
-        logger.info("No enabled library roots found. Nothing to scan.")
-        result.message = "No enabled library roots configured."
+        logger.info("No enabled media sources found. Scan skipped.")
+        result.message = (
+            "No media sources configured. "
+            "Add folders in Settings → Media Sources."
+        )
         return result
 
     logger.info("Scan started for %d enabled root(s)", len(enabled_roots))

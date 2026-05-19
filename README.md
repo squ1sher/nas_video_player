@@ -93,7 +93,7 @@ New `availability_status` field on `Video`:
 
 ### Application Settings and configurable Media Sources
 - New **Settings** page for managing media sources / library roots
-- Mount one broad host folder once (for example `/volume1/sclad -> /media/library`) and manage subfolders from the web UI
+- Mount one broad host folder once (for example `/volume1 -> /media`) and manage subfolders from the web UI
 - Each media source stores:
   - name, path, enabled flag, recursive flag, scan priority
   - last scan time, last scan status, last error
@@ -219,35 +219,86 @@ New `availability_status` field on `Video`:
 - Manual profile result overrides auto guess for all files linked to that media profile.
 - This creates a practical compatibility matrix for your actual browser/device setup (for example `.360` profiles can be marked playable if they really work).
 
-## Required NAS folders
+## Synology deployment and recovery
 
-Create these folders on your NAS before first run:
+### Deployment folders
+
+Host paths:
 
 ```
-/volume1/sclad                      ← broad media root (mounted as /media/library)
+/volume1/docker/video-player/project
 /volume1/docker/video-player/data
 /volume1/docker/video-player/thumbnails
 /volume1/docker/video-player/cache
+/volume1/docker/video-player/cache/hls
 /volume1/docker/video-player/logs
 ```
 
-### Recommended Docker mount strategy
+Container paths:
 
-Mount broad host roots in `docker-compose.yml`, then create/manage specific media sources in the web UI.
-
-Example:
-
-```yaml
-volumes:
-  - /volume1/sclad:/media/library:rw
+```
+/app/data
+/app/thumbnails
+/app/cache
+/app/cache/hls
+/app/logs
+/media
 ```
 
-Then in **Settings -> Media Sources**, add container paths such as:
-- `/media/library/Movies`
-- `/media/library/GoPro`
-- `/media/library/Family`
+`docker-compose.yml` mounts media as `/volume1:/media:rw`.
 
-Do **not** enter host paths in the app UI (for example `/volume1/sclad/Movies`).
+### First install on Synology
+
+```bash
+cd /volume1
+mkdir -p /volume1/docker/video-player
+cd /volume1/docker/video-player
+git clone https://github.com/squ1sher/nas_video_player.git project
+cd project
+bash scripts/bootstrap-synology.sh /volume1/docker/video-player
+sudo docker compose up -d --build
+```
+
+### Recovery when project/runtime folders were deleted
+
+If your shell is currently inside a deleted directory, Docker Compose fails with:
+
+```text
+getwd: no such file or directory
+```
+
+This means your current working directory no longer exists. Fix it by switching to a valid folder first, then restoring the project.
+
+```bash
+cd /volume1
+mkdir -p /volume1/docker/video-player
+cd /volume1/docker/video-player
+git clone https://github.com/squ1sher/nas_video_player.git project
+cd project
+bash scripts/bootstrap-synology.sh /volume1/docker/video-player
+sudo docker compose up -d --build
+```
+
+You can also use:
+
+```bash
+bash scripts/restore-project-from-git.sh /volume1/docker/video-player
+```
+
+Important: `scripts/bootstrap-synology.sh` recreates folders only. If `/volume1/docker/video-player/project` was deleted, you must clone/copy source files again.
+Container startup bootstrap only manages runtime paths under `/app/*` after Docker starts; it cannot recreate a missing host project checkout before `docker compose` runs.
+
+### Media source paths in UI
+
+- Compose mount is host `/volume1` -> container `/media`.
+- `/media` is the mounted browse root only. It is **not** auto-added as a media source and is **never** scanned directly.
+- On first startup, **Media Sources is empty** until you add subfolders.
+- In **Settings -> Media Sources**, browse `/volume1` and add subfolders such as:
+  - `sclad/Movies`
+  - `sclad/GoPro`
+  - `video/Family`
+- Internally, those resolve to container paths such as `/media/sclad/Movies`.
+- Paths under `/volume1/docker/video-player` are blocked because they contain app/project/runtime files.
 
 ## Project structure
 
@@ -324,6 +375,9 @@ nas_video_player/
   docker/
     nginx.conf
     entrypoint.sh
+  scripts/
+    bootstrap-synology.sh
+    restore-project-from-git.sh
   docker-compose.yml
   Dockerfile
   README.md
@@ -333,10 +387,10 @@ nas_video_player/
 
 | Variable             | Default              | Description                     |
 |----------------------|----------------------|---------------------------------|
-| `VIDEO_LIBRARY_PATH` | `/media/library`      | Broad mounted container root; fallback default source if none configured |
-| `ALLOWED_MEDIA_ROOT_BASES` | `` | Comma-separated allowed container base paths for Settings → Media Sources (recommended: `/media/library`) |
-| `MEDIA_LIBRARY_ROOTS` | `` | Optional bootstrap-only comma-separated media sources for first startup |
-| `MEDIA_LIBRARY_ROOTS_JSON` | `` | Optional bootstrap-only JSON alternative for first startup |
+| `VIDEO_LIBRARY_PATH` | `/media`      | Mounted media browse root inside the container; not scanned automatically |
+| `ALLOWED_MEDIA_ROOT_BASES` | `` | Comma-separated allowed container base paths for Settings → Media Sources (recommended: `/media`) |
+| `MEDIA_LIBRARY_ROOTS` | `` | Optional bootstrap-only comma-separated media sources (advanced/optional; normal UI-based setup does not require this) |
+| `MEDIA_LIBRARY_ROOTS_JSON` | `` | Optional bootstrap-only JSON alternative (advanced/optional; normal UI-based setup does not require this) |
 | `DATABASE_PATH`      | `/app/data/app.db`   | SQLite database file path       |
 | `THUMBNAILS_PATH`    | `/app/thumbnails`    | Thumbnails output directory     |
 | `CACHE_PATH`         | `/app/cache`         | Cache directory                 |
@@ -365,12 +419,14 @@ Open the app: `http://NAS_IP:8080`
 ### Host path vs container path (important)
 
 - In `docker-compose.yml`, you map **host path -> container path**.
-- In the web app Settings, always enter the **container path**.
+- The app mounts `/volume1` as `/media`, but the Settings UI is designed around **browsing `/volume1` and selecting subfolders**.
+- The mounted root itself is not scanned. Add explicit subfolders only.
 
 Example:
-- Compose mapping: `/volume1/sclad:/media/library:rw`
-- UI path (correct): `/media/library/Movies`
-- UI path (incorrect): `/volume1/sclad/Movies`
+- Compose mapping: `/volume1:/media:rw`
+- UI browse selection: `sclad/Movies`
+- Internal container path: `/media/sclad/Movies`
+- Mounted root (not allowed as source): `/media`
 
 You do not need to edit `docker-compose.yml` for every new media subfolder; add subfolders from Settings instead.
 
@@ -381,18 +437,21 @@ You do not need to edit `docker-compose.yml` for every new media subfolder; add 
 ## How to use
 
 1. Open `http://NAS_IP:8080`
-2. Open **Settings** → **Media Sources** if you want to add more mounted folders
-3. Click **Scan Library** — scan runs in background; watch the status bar
-4. Browse **All Videos** (newest first by default)
-5. Use **Folders** tab to navigate by directory
-6. Use **Continue Watching** tab to resume in-progress videos
-7. Use **Duplicates** tab to review likely duplicate candidates
-8. Click **Scan Duplicates** to run a separate duplicate scan
-9. Use **Diagnostics** tab to inspect problematic files and quick-filter the library
-10. In **Folders**, expand folders inline to browse nested folders and play files without switching tabs
-11. Click any video card or folder video item -> opens watch page in a **new tab**
-12. Video resumes from last position automatically
-13. Close the tab - progress is saved
+2. Open **Settings** → **Media Sources**
+3. Browse `/volume1` and add one or more subfolders (for example `sclad/Movies`)
+4. Click **Scan Library** — scan runs in background; watch the status bar
+   - If no media sources are configured, the app shows:
+     `No media sources configured. Add folders in Settings -> Media Sources.`
+5. Browse **All Videos** (newest first by default)
+6. Use **Folders** tab to navigate by directory
+7. Use **Continue Watching** tab to resume in-progress videos
+8. Use **Duplicates** tab to review likely duplicate candidates
+9. Click **Scan Duplicates** to run a separate duplicate scan
+10. Use **Diagnostics** tab to inspect problematic files and quick-filter the library
+11. In **Folders**, expand folders inline to browse nested folders and play files without switching tabs
+12. Click any video card or folder video item -> opens watch page in a **new tab**
+13. Video resumes from last position automatically
+14. Close the tab - progress is saved
 
 ## API endpoints
 
@@ -448,11 +507,12 @@ You do not need to edit `docker-compose.yml` for every new media subfolder; add 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/settings/media-sources` | List configured media sources |
+| `GET` | `/api/settings/media-sources/browse?relative_path=` | Browse subdirectories under `/media` (displayed as `/volume1` in UI) |
 | `POST` | `/api/settings/media-sources` | Create a media source |
 | `GET` | `/api/settings/media-sources/{id}` | Get one media source |
 | `PUT` | `/api/settings/media-sources/{id}` | Update a media source |
 | `DELETE` | `/api/settings/media-sources/{id}` | Remove a media source config |
-| `POST` | `/api/settings/media-sources/validate` | Validate a container path before saving |
+| `POST` | `/api/settings/media-sources/validate` | Validate a selected media subfolder before saving |
 | `POST` | `/api/settings/media-sources/{id}/scan` | Start a library scan of all enabled sources |
 
 ### Library diagnostics
@@ -601,6 +661,31 @@ PYTHONPATH=. pytest
 ```
 
 ## Troubleshooting
+
+### `getwd: no such file or directory` when running `docker compose`
+
+- Cause: your current shell directory was deleted (commonly `/volume1/docker/video-player/project`).
+- Docker Compose cannot run from a deleted working directory.
+- Fix by changing to an existing directory, then restoring project files:
+
+```bash
+cd /volume1
+mkdir -p /volume1/docker/video-player
+cd /volume1/docker/video-player
+git clone https://github.com/squ1sher/nas_video_player.git project
+cd project
+bash scripts/bootstrap-synology.sh /volume1/docker/video-player
+sudo docker compose up -d --build
+```
+
+- If you already have project files restored, you can skip clone and run just the bootstrap script.
+
+### Media Sources shows empty list on first startup
+
+- This is the expected behavior.
+- The app no longer auto-creates a `Default` source pointing at `/media`.
+- Browse `/volume1` in **Settings → Media Sources** and add explicit subfolders such as `sclad/Movies`.
+- `/media` is the mounted root only and is not scanned directly.
 
 ### No videos shown after scan
 

@@ -21,6 +21,7 @@ import type {
   LibrarySummary,
   MediaProfileDetail,
   MediaProfileItem,
+  MediaSourceBrowseItem,
   ManualPlaybackStatus,
   PathValidationResult,
   PlaybackSource,
@@ -339,6 +340,15 @@ export async function regenerateThumbnail(videoId: number): Promise<VideoDetail>
 }
 
 // ── Settings – Media Sources ───────────────────────────────────────────────
+
+export async function browseMediaSources(relativePath = ""): Promise<MediaSourceBrowseItem[]> {
+  const params = new URLSearchParams();
+  if (relativePath) params.set("relative_path", relativePath);
+  params.set("t", String(Date.now()));
+  return handleResponse<MediaSourceBrowseItem[]>(
+    await fetch(`${API_BASE}/settings/media-sources/browse?${params}`, { cache: "no-store" })
+  );
+}
 
 export async function getMediaSources(): Promise<LibraryRoot[]> {
   return handleResponse<LibraryRoot[]>(

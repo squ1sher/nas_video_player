@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 class HealthResponse(BaseModel):
     status: str
+    runtime_dirs: dict[str, str]
 
 
 class ScanResponse(BaseModel):
@@ -475,6 +476,8 @@ class LibraryRootOut(BaseModel):
     id: int
     name: str
     path: str
+    relative_path: str = ""    # relative to media root, e.g. "sclad/Movies"
+    display_path: str = ""     # host-side display path, e.g. "/volume1/sclad/Movies"
     media_type: str
     enabled: bool
     recursive: bool
@@ -498,3 +501,21 @@ class PathValidationResult(BaseModel):
     path: Optional[str] = None
     code: Optional[str] = None
     message: str
+
+
+class MediaSourceBrowseItem(BaseModel):
+    name: str
+    relative_path: str    # e.g. "sclad/Movies"
+    internal_path: str    # e.g. "/media/sclad/Movies"
+    display_path: str     # e.g. "/volume1/sclad/Movies"
+    is_directory: bool
+    already_added: bool
+    blocked: bool
+
+
+class PathValidationResult(BaseModel):
+    valid: bool
+    path: Optional[str] = None
+    code: Optional[str] = None
+    message: str
+

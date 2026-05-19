@@ -239,6 +239,47 @@ button {
   color: #ff8888;
 }
 
+.scan-no-sources {
+  background: #2a2a10;
+  color: #d4c96e;
+}
+
+/* ── Browse modal ── */
+.browse-breadcrumb {
+  font-size: 13px;
+  color: #aaa;
+  margin-bottom: 8px;
+}
+.browse-breadcrumb-link {
+  cursor: pointer;
+  color: #90c0ff;
+  text-decoration: underline;
+}
+.browse-breadcrumb-link:hover { color: #c0e0ff; }
+.browse-up-btn { margin-bottom: 8px; }
+.browse-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.browse-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.browse-item:hover { background: #1e2a3a; }
+.browse-item-blocked { opacity: 0.45; cursor: default; }
+.browse-item-added { opacity: 0.7; }
+.browse-item-name { cursor: pointer; flex: 1; }
+.browse-blocked-label { color: #ff8888; font-size: 11px; }
+.browse-added-label { color: #888; font-size: 11px; }
+
 .scan-spinner {
   display: inline-block;
   width: 12px;

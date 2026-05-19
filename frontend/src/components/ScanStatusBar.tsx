@@ -2,9 +2,18 @@ import type { ScanStatus } from "../types/video";
 
 type Props = {
   status: ScanStatus | null;
+  noSourcesMessage?: string | null;
 };
 
-export function ScanStatusBar({ status }: Props) {
+export function ScanStatusBar({ status, noSourcesMessage }: Props) {
+  if (noSourcesMessage) {
+    return (
+      <div className="scan-status scan-no-sources">
+        ℹ️ {noSourcesMessage}
+      </div>
+    );
+  }
+
   if (!status || status.status === "idle") return null;
 
   const currentFile = status.current_file ? status.current_file.split("/").pop() : null;
@@ -24,6 +33,14 @@ export function ScanStatusBar({ status }: Props) {
   }
 
   if (status.status === "completed") {
+    // special case: scan finished but nothing was configured
+    if (status.total_roots === 0 && status.message) {
+      return (
+        <div className="scan-status scan-no-sources">
+          ℹ️ {status.message}
+        </div>
+      );
+    }
     return (
       <div className="scan-status scan-done">
         ✓ Scan complete{rootProgress} &mdash; {status.scanned_files} scanned, {status.detected_videos} detected videos,{" "}

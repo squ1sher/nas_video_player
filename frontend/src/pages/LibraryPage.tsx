@@ -84,6 +84,7 @@ export function LibraryPage() {
   const [folderVideos, setFolderVideos] = useState<VideoListItem[]>([]);
   const [folderLoading, setFolderLoading] = useState(true);
   const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null);
+  const [noSourcesMessage, setNoSourcesMessage] = useState<string | null>(null);
   const [duplicateStatus, setDuplicateStatus] = useState<DuplicateScanStatus | null>(null);
   const [duplicateSummary, setDuplicateSummary] = useState<DuplicateSummary | null>(null);
   const [librarySummary, setLibrarySummary] = useState<LibrarySummary | null>(null);
@@ -603,7 +604,12 @@ export function LibraryPage() {
 
     try {
       setError(null);
-      await runScan();
+      setNoSourcesMessage(null);
+      const resp = await runScan();
+      if (resp.status === "no_sources") {
+        setNoSourcesMessage(resp.message);
+        return;
+      }
       const status = await getScanStatus();
       setScanStatus(status);
       if (isScanActive(status)) {
@@ -784,7 +790,7 @@ export function LibraryPage() {
           </div>
         </header>
 
-        <ScanStatusBar status={scanStatus} />
+        <ScanStatusBar status={scanStatus} noSourcesMessage={noSourcesMessage} />
         {isScanActive(scanStatus) && <div className="library-updating-badge">Library is updating...</div>}
         {error && <div className="error">{error}</div>}
         {hlsMaintenanceMessage && <div className="notice">{hlsMaintenanceMessage}</div>}

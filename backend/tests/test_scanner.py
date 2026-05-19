@@ -76,6 +76,27 @@ def _build_settings(tmp_path: Path):
     )
 
 
+def _ensure_root(db, tmp_path: Path):
+    """Insert a LibraryRoot for tmp_path/videos so scanner tests work without auto-bootstrap."""
+    from app.models import LibraryRoot
+    root_path = str(tmp_path / "videos")
+    existing = db.query(LibraryRoot).filter(LibraryRoot.path == root_path).first()
+    if existing:
+        return existing
+    root = LibraryRoot(
+        name="Test Root",
+        path=root_path,
+        media_type="video",
+        enabled=True,
+        recursive=True,
+        scan_priority=100,
+    )
+    db.add(root)
+    db.commit()
+    db.refresh(root)
+    return root
+
+
 def test_probe_unknown_extension_is_indexed(tmp_path: Path, monkeypatch) -> None:
     setup_test_db(tmp_path)
     root = tmp_path / "videos"
@@ -92,6 +113,7 @@ def test_probe_unknown_extension_is_indexed(tmp_path: Path, monkeypatch) -> None
     from app.models import Video
 
     db = SessionLocal()
+    _ensure_root(db, tmp_path)
     settings = _build_settings(tmp_path)
     result = scan_video_library(db, settings)
     videos = db.query(Video).all()
@@ -119,6 +141,7 @@ def test_uppercase_mpg_extension_normalized(tmp_path: Path, monkeypatch) -> None
     from app.models import Video
 
     db = SessionLocal()
+    _ensure_root(db, tmp_path)
     scan_video_library(db, _build_settings(tmp_path))
     video = db.query(Video).first()
     db.close()
@@ -140,6 +163,7 @@ def test_probe_failure_indexes_possible_video_when_allowed(tmp_path: Path, monke
     from app.models import Video
 
     db = SessionLocal()
+    _ensure_root(db, tmp_path)
     result = scan_video_library(db, _build_settings(tmp_path))
     video = db.query(Video).first()
     db.close()
@@ -165,6 +189,7 @@ def test_probe_success_without_video_stream_is_ignored(tmp_path: Path, monkeypat
     from app.models import Video
 
     db = SessionLocal()
+    _ensure_root(db, tmp_path)
     result = scan_video_library(db, _build_settings(tmp_path))
     count = db.query(Video).count()
     db.close()
@@ -183,6 +208,7 @@ def test_excluded_extensions_are_skipped(tmp_path: Path) -> None:
     from app.models import Video
 
     db = SessionLocal()
+    _ensure_root(db, tmp_path)
     result = scan_video_library(db, _build_settings(tmp_path))
     count = db.query(Video).count()
     db.close()
@@ -211,6 +237,7 @@ def test_thumbnail_failure_does_not_remove_indexed_video(tmp_path: Path, monkeyp
     from app.models import Video
 
     db = SessionLocal()
+    _ensure_root(db, tmp_path)
     result = scan_video_library(db, _build_settings(tmp_path))
     video = db.query(Video).first()
     db.close()
@@ -283,6 +310,7 @@ def test_scan_reconciles_stale_hls_variants_when_files_missing(tmp_path: Path) -
     from app.models import Video, VideoVariant
 
     db = SessionLocal()
+    _ensure_root(db, tmp_path)
     video = Video(
         title="stale",
         filename="stale.mp4",
@@ -346,6 +374,7 @@ def test_scanner_stops_when_cancellation_requested(tmp_path: Path, monkeypatch) 
     from app.database import SessionLocal
 
     db = SessionLocal()
+    _ensure_root(db, tmp_path)
     start_scan()
     result = scan_video_library(db, _build_settings(tmp_path))
     db.close()
@@ -366,6 +395,7 @@ def test_cancelled_scan_does_not_run_missing_cleanup(tmp_path: Path, monkeypatch
     from app.scan_status import request_scan_cancellation, start_scan
 
     db = SessionLocal()
+    _ensure_root(db, tmp_path)
     stale = Video(
         title="missing",
         filename="missing.mp4",
@@ -442,6 +472,7 @@ def test_indexed_video_is_visible_before_scan_completion(tmp_path: Path, monkeyp
     def run_scan_in_thread() -> None:
         db = SessionLocal()
         try:
+            _ensure_root(db, tmp_path)
             scan_video_library(db, _build_settings(tmp_path))
         finally:
             db.close()

@@ -1,9 +1,12 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from app.config import Settings, get_settings
+from app.database import get_db
+from app.models import LibraryRoot
 from app.scan_status import get_scan_state, request_scan_cancellation
 from app.scanner import scan_video_library_background
 from app.schemas import ScanStartedResponse, ScanStatusOut
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api", tags=["scan"])
 
@@ -41,6 +44,7 @@ def _scan_state_payload(state) -> dict[str, object]:
 def scan_library(
     background_tasks: BackgroundTasks,
     settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
 ) -> ScanStartedResponse:
     """Start a library scan in the background and return immediately."""
     state = get_scan_state()
@@ -53,6 +57,20 @@ def scan_library(
                 "current_status": _scan_state_payload(state),
             },
         )
+
+    # Check for no-sources before launching a background thread
+    enabled_count = (
+        db.query(LibraryRoot).filter(LibraryRoot.enabled.is_(True)).count()
+    )
+    if enabled_count == 0:
+        return ScanStartedResponse(
+            status="no_sources",
+            message=(
+                "No media sources configured. "
+                "Add folders in Settings → Media Sources."
+            ),
+        )
+
     background_tasks.add_task(scan_video_library_background, settings)
     return ScanStartedResponse(status="started", message="Scan started in background")
 
