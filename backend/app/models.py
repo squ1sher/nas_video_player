@@ -99,6 +99,34 @@ class WatchProgress(Base):
     )
 
 
+class Tag(Base):
+    __tablename__ = "tags"
+    __table_args__ = (UniqueConstraint("parent_id", "normalized_name", name="uq_tags_parent_normalized_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    parent_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("tags.id", ondelete="CASCADE"), nullable=True, index=True)
+    path: Mapped[str] = mapped_column(String(2048), nullable=False, index=True)
+    depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    color: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class VideoTag(Base):
+    __tablename__ = "video_tags"
+    __table_args__ = (UniqueConstraint("video_id", "tag_id", name="uq_video_tags_video_tag"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    video_id: Mapped[int] = mapped_column(Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, index=True)
+    tag_id: Mapped[int] = mapped_column(Integer, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class DuplicateCandidateGroup(Base):
     __tablename__ = "duplicate_candidate_groups"
 

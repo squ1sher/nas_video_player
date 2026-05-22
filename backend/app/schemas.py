@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -92,6 +92,7 @@ class VideoListItem(BaseModel):
     file_modified_at: datetime | None
     created_at: datetime
     indexed_at: datetime
+    tags: list["VideoTagLiteOut"] = Field(default_factory=list)
 
 
 class VideoDetail(BaseModel):
@@ -134,6 +135,58 @@ class VideoDetail(BaseModel):
     created_at: datetime
     updated_at: datetime
     indexed_at: datetime
+    tags: list["VideoTagLiteOut"] = Field(default_factory=list)
+
+
+class VideoTagLiteOut(BaseModel):
+    id: int
+    name: str
+    path: str
+    color: str | None = None
+
+
+class VideoTagOut(BaseModel):
+    id: int
+    name: str
+    path: str
+    parent_id: int | None = None
+    color: str | None = None
+
+
+class VideoTagAssignIn(BaseModel):
+    tag_ids: list[int]
+
+
+class TagCreateIn(BaseModel):
+    name: str
+    parent_id: int | None = None
+    color: str | None = None
+    description: str | None = None
+
+
+class TagUpdateIn(BaseModel):
+    name: str
+    parent_id: int | None = None
+    color: str | None = None
+    description: str | None = None
+
+
+class TagOut(BaseModel):
+    id: int
+    name: str
+    normalized_name: str
+    parent_id: int | None = None
+    path: str
+    depth: int
+    color: str | None = None
+    description: str | None = None
+    video_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class TagTreeOut(TagOut):
+    children: list["TagTreeOut"] = Field(default_factory=list)
 
 
 class WatchProgressIn(BaseModel):

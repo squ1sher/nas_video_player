@@ -41,6 +41,11 @@ def _index_exists(engine: Engine, index_name: str) -> bool:
         return result.first() is not None
 
 
+def _table_exists(engine: Engine, table_name: str) -> bool:
+    insp = inspect(engine)
+    return table_name in insp.get_table_names()
+
+
 def _create_index_if_missing(
     engine: Engine,
     index_name: str,
@@ -51,6 +56,13 @@ def _create_index_if_missing(
         logger.info("Migration: creating index %s on %s.%s", index_name, table, column)
         with engine.begin() as conn:
             conn.execute(text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({column})"))
+
+
+def _drop_index_if_exists(engine: Engine, index_name: str) -> None:
+    if _index_exists(engine, index_name):
+        logger.info("Migration: dropping legacy index %s", index_name)
+        with engine.begin() as conn:
+            conn.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
 
 
 def _table_sql(engine: Engine, table: str) -> str:
@@ -155,6 +167,86 @@ def _rebuild_videos_table_for_multi_root(engine: Engine) -> None:
         )
         conn.execute(text("DROP TABLE videos"))
         conn.execute(text("ALTER TABLE videos__new RENAME TO videos"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+
+
+def _tags_table_requires_hierarchy_rebuild(engine: Engine) -> bool:
+    sql = " ".join(_table_sql(engine, "tags").lower().split())
+    if not sql:
+        return False
+    # Legacy flat-tag schema had a global UNIQUE(normalized_name) constraint.
+    has_global_unique = "unique (normalized_name)" in sql or "normalized_name varchar(255) not null unique" in sql
+    has_scoped_unique = "unique (parent_id, normalized_name)" in sql
+    return has_global_unique and not has_scoped_unique
+
+
+def _rebuild_tags_table_for_hierarchy(engine: Engine) -> None:
+    if not _tags_table_requires_hierarchy_rebuild(engine):
+        return
+
+    logger.info("Migration: rebuilding tags table to remove legacy global normalized_name uniqueness")
+    has_normalized = _column_exists(engine, "tags", "normalized_name")
+    has_parent = _column_exists(engine, "tags", "parent_id")
+    has_path = _column_exists(engine, "tags", "path")
+    has_depth = _column_exists(engine, "tags", "depth")
+    has_color = _column_exists(engine, "tags", "color")
+    has_description = _column_exists(engine, "tags", "description")
+    has_created_at = _column_exists(engine, "tags", "created_at")
+    has_updated_at = _column_exists(engine, "tags", "updated_at")
+
+    normalized_expr = "coalesce(nullif(trim(normalized_name), ''), lower(trim(name)))" if has_normalized else "lower(trim(name))"
+    parent_expr = "parent_id" if has_parent else "NULL"
+    path_expr = "coalesce(nullif(trim(path), ''), name)" if has_path else "name"
+    depth_expr = "coalesce(depth, 0)" if has_depth else "0"
+    color_expr = "color" if has_color else "NULL"
+    description_expr = "description" if has_description else "NULL"
+    created_at_expr = "coalesce(created_at, CURRENT_TIMESTAMP)" if has_created_at else "CURRENT_TIMESTAMP"
+    updated_at_expr = "coalesce(updated_at, CURRENT_TIMESTAMP)" if has_updated_at else "CURRENT_TIMESTAMP"
+
+    with engine.begin() as conn:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(
+            text(
+                """
+                CREATE TABLE tags__new (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    normalized_name VARCHAR(255) NOT NULL,
+                    parent_id INTEGER NULL REFERENCES tags(id) ON DELETE CASCADE,
+                    path VARCHAR(2048) NOT NULL,
+                    depth INTEGER NOT NULL DEFAULT 0,
+                    color VARCHAR(32) NULL,
+                    description TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                f"""
+                INSERT INTO tags__new (
+                    id, name, normalized_name, parent_id, path, depth,
+                    color, description, created_at, updated_at
+                )
+                SELECT
+                    id,
+                    name,
+                    {normalized_expr},
+                    {parent_expr},
+                    {path_expr},
+                    {depth_expr},
+                    {color_expr},
+                    {description_expr},
+                    {created_at_expr},
+                    {updated_at_expr}
+                FROM tags
+                """
+            )
+        )
+        conn.execute(text("DROP TABLE tags"))
+        conn.execute(text("ALTER TABLE tags__new RENAME TO tags"))
         conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
@@ -471,6 +563,121 @@ def run_migrations(engine: Engine) -> None:
     _create_index_if_missing(engine, "ix_videos_library_root_id", "videos", "library_root_id")
     _create_index_if_missing(engine, "ix_videos_relative_path", "videos", "relative_path")
     _create_index_if_missing(engine, "ix_videos_absolute_path", "videos", "absolute_path")
+
+    # ── tags table (hierarchical) ─────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS tags (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    normalized_name VARCHAR(255) NOT NULL,
+                    parent_id INTEGER NULL REFERENCES tags(id) ON DELETE CASCADE,
+                    path VARCHAR(2048) NOT NULL,
+                    depth INTEGER NOT NULL DEFAULT 0,
+                    color VARCHAR(32) NULL,
+                    description TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    _rebuild_tags_table_for_hierarchy(engine)
+
+    # Support older flat-tag table shapes if they exist.
+    tag_migrations = [
+        ("normalized_name", "VARCHAR(255)"),
+        ("parent_id", "INTEGER NULL REFERENCES tags(id)"),
+        ("path", "VARCHAR(2048)"),
+        ("depth", "INTEGER NOT NULL DEFAULT 0"),
+        ("color", "VARCHAR(32)"),
+        ("description", "TEXT"),
+        ("created_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+        ("updated_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+    ]
+    for col, col_def in tag_migrations:
+        _add_column_if_missing(engine, "tags", col, col_def)
+
+    _drop_index_if_exists(engine, "uq_tags_normalized_name")
+    _drop_index_if_exists(engine, "ix_tags_normalized_name_unique")
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE tags
+                SET normalized_name = lower(trim(name))
+                WHERE normalized_name IS NULL OR trim(normalized_name) = ''
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE tags
+                SET path = name
+                WHERE path IS NULL OR trim(path) = ''
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE tags
+                SET depth = CASE
+                    WHEN path IS NULL OR trim(path) = '' THEN 0
+                    ELSE (length(path) - length(replace(path, '/', '')))
+                END
+                WHERE depth IS NULL
+                """
+            )
+        )
+
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tags_parent_id ON tags (parent_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tags_path ON tags (path)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tags_normalized_name ON tags (normalized_name)"))
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_tags_parent_normalized_expr
+                ON tags (ifnull(parent_id, -1), normalized_name)
+                """
+            )
+        )
+
+    # ── video_tags table ─────────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS video_tags (
+                    id INTEGER PRIMARY KEY,
+                    video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+                    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    if _table_exists(engine, "video_tags"):
+        _add_column_if_missing(engine, "video_tags", "created_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP")
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_video_tags_video_tag
+                ON video_tags (video_id, tag_id)
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_video_tags_video_id ON video_tags (video_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_video_tags_tag_id ON video_tags (tag_id)"))
 
     logger.info("Database migrations applied successfully")
 

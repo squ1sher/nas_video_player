@@ -234,9 +234,22 @@ New `availability_status` field on `Video`:
   - Duplicates
   - Playback Compatibility
   - Maintenance
+  - Tags
   - System / Runtime
 - Active background processes are shown in a global bottom status bar (scan, HLS batch/jobs, duplicate scan).
 - Library no longer contains Duplicates/Diagnostics process panels or large maintenance controls.
+- Library cards stay thumbnail-first; hover overlay shows title and assigned tag paths.
+- All Videos uses manual `Load more` to keep thumbnail loading lighter on NAS/browser.
+
+### Hierarchical tags (v1)
+
+- Tags are assigned from the **Watch** page (above the player).
+- Tags are hierarchical (for example `Family/Alex`, `Travel/Spain/Mallorca`) and can be nested to any depth.
+- **Settings -> Tags** manages the global tag tree (create child tags, rename, move, delete leaf tags).
+- Library cards do not edit tags; they only display assigned tag paths in the hover overlay.
+- Tag filtering/sorting in Library is planned for a later phase and is not included in v1.
+- Deleting a video removes its tag associations.
+- Deleting a tag removes associations for that tag but does not delete videos.
 
 
 ### Deployment folders

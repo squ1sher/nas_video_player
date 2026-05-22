@@ -39,6 +39,7 @@ import type {
   MediaSourceBrowseItem,
   PathValidationResult,
 } from "../types/video";
+import { TagsManagementSection } from "../components/tags/TagsManagementSection";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
@@ -849,6 +850,8 @@ export function SettingsPage() {
           <button className="btn-secondary" onClick={() => navigate("/maintenance")}>Open Maintenance →</button>
         </div>
       </section>
+
+      <TagsManagementSection onChanged={() => void load()} />
 
       {/* System */}
       <section className="settings-section" id="system-runtime">

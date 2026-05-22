@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.media_probe import probe_video
-from app.models import DuplicateCandidateItem, HlsJob, LibraryRoot, MediaProfile, Video, VideoVariant, WatchProgress
-from app.schemas import VideoDetail, VideoListItem
+from app.models import DuplicateCandidateItem, HlsJob, LibraryRoot, MediaProfile, Video, VideoTag, VideoVariant, WatchProgress
+from app.schemas import VideoDetail, VideoListItem, VideoTagAssignIn, VideoTagOut
 from app.services.library_root_service import resolve_video_source_path
 from app.services.media_profile_service import (
     assign_profile_to_video,
@@ -21,6 +21,7 @@ from app.services.media_profile_service import (
     upsert_media_profile,
 )
 from app.streaming import RangeError, iter_file_chunks, parse_range_header
+from app.services.tag_service import TagError, assign_video_tags, get_video_tags, get_video_tags_map, remove_video_tag
 from app.thumbnails import generate_thumbnail
 from app.utils.files import guess_mime_type
 
@@ -37,7 +38,11 @@ SORT_FIELDS = {
 }
 
 
-def to_list_item(video: Video, library_root_name: str | None = None) -> VideoListItem:
+def to_list_item(
+    video: Video,
+    library_root_name: str | None = None,
+    tags: list[dict[str, object]] | None = None,
+) -> VideoListItem:
     thumb_url = f"/api/videos/{video.id}/thumbnail" if video.thumbnail_path else None
     file_modified_at = datetime.fromtimestamp(video.modified_ts, tz=timezone.utc) if video.modified_ts else None
     return VideoListItem(
@@ -78,10 +83,15 @@ def to_list_item(video: Video, library_root_name: str | None = None) -> VideoLis
         file_modified_at=file_modified_at,
         created_at=video.created_at,
         indexed_at=video.indexed_at,
+        tags=tags or [],
     )
 
 
-def to_detail(video: Video, library_root_name: str | None = None) -> VideoDetail:
+def to_detail(
+    video: Video,
+    library_root_name: str | None = None,
+    tags: list[dict[str, object]] | None = None,
+) -> VideoDetail:
     thumb_url = f"/api/videos/{video.id}/thumbnail" if video.thumbnail_path else None
     file_modified_at = datetime.fromtimestamp(video.modified_ts, tz=timezone.utc) if video.modified_ts else None
     return VideoDetail(
@@ -124,6 +134,7 @@ def to_detail(video: Video, library_root_name: str | None = None) -> VideoDetail
         created_at=video.created_at,
         updated_at=video.updated_at,
         indexed_at=video.indexed_at,
+        tags=tags or [],
     )
 
 
@@ -209,17 +220,63 @@ def list_videos(
     sort_field = SORT_FIELDS.get(sort, Video.created_at)
     sort_direction = desc if order.lower() == "desc" else asc
     videos = query.order_by(sort_direction(sort_field)).all()
+    tags_by_video = get_video_tags_map(db, [video.id for video in videos])
     root_name_by_id = {
         root.id: root.name
         for root in db.query(LibraryRoot).all()
     }
-    return [to_list_item(video, root_name_by_id.get(video.library_root_id)) for video in videos]
+    return [
+        to_list_item(
+            video,
+            root_name_by_id.get(video.library_root_id),
+            tags=tags_by_video.get(video.id, []),
+        )
+        for video in videos
+    ]
 
 
 @router.get("/{video_id}", response_model=VideoDetail)
 def get_video(video_id: int, db: Session = Depends(get_db)) -> VideoDetail:
     video = get_video_or_404(db, video_id)
-    return to_detail(video, _library_root_name_for_video(db, video))
+    return to_detail(video, _library_root_name_for_video(db, video), tags=get_video_tags_map(db, [video.id]).get(video.id, []))
+
+
+@router.get("/{video_id}/tags", response_model=list[VideoTagOut])
+def get_video_tag_list(video_id: int, db: Session = Depends(get_db)) -> list[VideoTagOut]:
+    try:
+        return [VideoTagOut(**item) for item in get_video_tags(db, video_id)]
+    except TagError as exc:
+        status_code = 404 if exc.code == "video_not_found" else 409
+        raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+@router.post("/{video_id}/tags", response_model=list[VideoTagOut])
+def add_video_tags(video_id: int, body: VideoTagAssignIn, db: Session = Depends(get_db)) -> list[VideoTagOut]:
+    try:
+        payload = assign_video_tags(db, video_id=video_id, tag_ids=body.tag_ids, replace=False)
+        return [VideoTagOut(**item) for item in payload]
+    except TagError as exc:
+        status_code = 404 if exc.code in {"video_not_found", "tag_not_found"} else 409
+        raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+@router.put("/{video_id}/tags", response_model=list[VideoTagOut])
+def replace_video_tags(video_id: int, body: VideoTagAssignIn, db: Session = Depends(get_db)) -> list[VideoTagOut]:
+    try:
+        payload = assign_video_tags(db, video_id=video_id, tag_ids=body.tag_ids, replace=True)
+        return [VideoTagOut(**item) for item in payload]
+    except TagError as exc:
+        status_code = 404 if exc.code in {"video_not_found", "tag_not_found"} else 409
+        raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+@router.delete("/{video_id}/tags/{tag_id}")
+def delete_video_tag(video_id: int, tag_id: int, db: Session = Depends(get_db)) -> dict[str, bool]:
+    try:
+        return remove_video_tag(db, video_id=video_id, tag_id=tag_id)
+    except TagError as exc:
+        status_code = 404 if exc.code == "video_not_found" else 409
+        raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
 
 
 @router.post("/{video_id}/reprobe", response_model=VideoDetail)
@@ -335,7 +392,7 @@ def reprobe_video(
 
     db.commit()
     db.refresh(video)
-    return to_detail(video, _library_root_name_for_video(db, video))
+    return to_detail(video, _library_root_name_for_video(db, video), tags=get_video_tags_map(db, [video.id]).get(video.id, []))
 
 
 @router.post("/{video_id}/thumbnail/regenerate", response_model=VideoDetail)
@@ -361,7 +418,7 @@ def regenerate_video_thumbnail(
 
     db.commit()
     db.refresh(video)
-    return to_detail(video, _library_root_name_for_video(db, video))
+    return to_detail(video, _library_root_name_for_video(db, video), tags=get_video_tags_map(db, [video.id]).get(video.id, []))
 
 
 @router.get("/{video_id}/thumbnail")
@@ -457,6 +514,7 @@ def delete_video(
     db.query(WatchProgress).filter(WatchProgress.video_id == video_id).delete()
     db.query(VideoVariant).filter(VideoVariant.video_id == video_id).delete()
     db.query(DuplicateCandidateItem).filter(DuplicateCandidateItem.video_id == video_id).delete()
+    db.query(VideoTag).filter(VideoTag.video_id == video_id).delete()
 
     db.flush()
     db.delete(video)

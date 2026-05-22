@@ -24,6 +24,13 @@ export function VideoCard({ video, progress }: Props) {
           <div className="thumb placeholder">No Thumbnail</div>
         )}
         <div className="thumb-title-overlay" aria-hidden="true">
+          {video.tags.length > 0 ? (
+            <div className="thumb-tags-row">
+              {video.tags.map((tag) => (
+                <span key={tag.id} className="thumb-tag-chip" title={tag.path}>{tag.path}</span>
+              ))}
+            </div>
+          ) : null}
           <span className="thumb-title-text">{video.title}</span>
         </div>
       </div>

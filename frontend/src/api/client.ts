@@ -28,8 +28,11 @@ import type {
   PlaybackSource,
   ScanStartedResponse,
   ScanStatus,
+  TagItem,
+  TagTreeNode,
   VideoDetail,
   VideoListItem,
+  VideoTag,
   VideoWithProgress,
   WatchProgress,
 } from "../types/video";
@@ -325,6 +328,95 @@ export function getDownloadUrl(videoId: number): string {
 export async function deleteVideo(videoId: number): Promise<{ deleted: boolean }> {
   return handleResponse<{ deleted: boolean }>(
     await fetch(`${API_BASE}/videos/${videoId}`, {
+      method: "DELETE",
+    })
+  );
+}
+
+export async function getTagTree(): Promise<TagTreeNode[]> {
+  return handleResponse<TagTreeNode[]>(
+    await fetch(`${API_BASE}/tags/tree?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function getTags(): Promise<TagItem[]> {
+  return handleResponse<TagItem[]>(
+    await fetch(`${API_BASE}/tags?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function createTag(data: {
+  name: string;
+  parent_id?: number | null;
+  color?: string | null;
+  description?: string | null;
+}): Promise<TagItem> {
+  return handleResponse<TagItem>(
+    await fetch(`${API_BASE}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    })
+  );
+}
+
+export async function updateTag(
+  tagId: number,
+  data: {
+    name: string;
+    parent_id?: number | null;
+    color?: string | null;
+    description?: string | null;
+  }
+): Promise<TagItem> {
+  return handleResponse<TagItem>(
+    await fetch(`${API_BASE}/tags/${tagId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    })
+  );
+}
+
+export async function deleteTag(
+  tagId: number,
+  force = false
+): Promise<{ deleted: boolean; deleted_tags: number; removed_links: number }> {
+  const suffix = force ? "?force=true" : "";
+  return handleResponse<{ deleted: boolean; deleted_tags: number; removed_links: number }>(
+    await fetch(`${API_BASE}/tags/${tagId}${suffix}`, { method: "DELETE" })
+  );
+}
+
+export async function getVideoTags(videoId: number): Promise<VideoTag[]> {
+  return handleResponse<VideoTag[]>(
+    await fetch(`${API_BASE}/videos/${videoId}/tags?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function addVideoTags(videoId: number, tagIds: number[]): Promise<VideoTag[]> {
+  return handleResponse<VideoTag[]>(
+    await fetch(`${API_BASE}/videos/${videoId}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tag_ids: tagIds }),
+    })
+  );
+}
+
+export async function replaceVideoTags(videoId: number, tagIds: number[]): Promise<VideoTag[]> {
+  return handleResponse<VideoTag[]>(
+    await fetch(`${API_BASE}/videos/${videoId}/tags`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tag_ids: tagIds }),
+    })
+  );
+}
+
+export async function removeVideoTag(videoId: number, tagId: number): Promise<{ deleted: boolean }> {
+  return handleResponse<{ deleted: boolean }>(
+    await fetch(`${API_BASE}/videos/${videoId}/tags/${tagId}`, {
       method: "DELETE",
     })
   );

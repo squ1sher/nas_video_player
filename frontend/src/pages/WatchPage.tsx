@@ -12,7 +12,9 @@ import {
   reprobeVideo,
 } from "../api/client";
 import { CompatibilityBadge } from "../components/CompatibilityBadge";
+import { VideoTagsPanel } from "../components/tags/VideoTagsPanel";
 import { VideoPlayer } from "../components/VideoPlayer";
+import type { VideoTag } from "../types/video";
 import type { HlsVideoStatus, PlaybackSource, VideoDetail, WatchProgress } from "../types/video";
 
 function formatDuration(seconds: number | null): string {
@@ -213,6 +215,13 @@ export function WatchPage() {
     }
   };
 
+  const handleTagsChanged = (tags: VideoTag[]) => {
+    setVideo((prev) => {
+      if (!prev) return prev;
+      return { ...prev, tags };
+    });
+  };
+
   return (
     <div className="page watch-page">
       <div className="watch-header">
@@ -242,46 +251,7 @@ export function WatchPage() {
       </div>
 
       {actionMessage && <div className="notice">{actionMessage}</div>}
-
-      <div className="diagnostics-section">
-        <div className="diagnostics-section-header">
-          <h3>Playback Source</h3>
-        </div>
-        <p><strong>Source:</strong> {playbackSource?.source_type ?? "loading"}</p>
-        <p><strong>Reason:</strong> {playbackSource?.reason ?? "Loading playback source..."}</p>
-        <p>
-          <strong>HLS status:</strong> {hlsStatus?.status ?? "idle"}
-          {hlsStatus?.current_quality ? ` (${hlsStatus.current_quality})` : ""}
-          {hlsStatus?.progress_percent !== null && hlsStatus?.progress_percent !== undefined
-            ? ` - ${Math.round(hlsStatus.progress_percent)}%`
-            : ""}
-        </p>
-        {hlsStatus?.status === "completed" && playbackSource?.source_type !== "hls" && (
-          <p className="card-warning">HLS ready. Click "Use HLS" to switch playback source.</p>
-        )}
-        {hlsStatus?.error_message && <p className="card-warning">{hlsStatus.error_message}</p>}
-        <div className="media-profiles-toolbar">
-          <label>
-            Quality
-            <select
-              value={selectedQuality}
-              onChange={(event) => setSelectedQuality(event.target.value)}
-              disabled={qualityOptions.length === 0 || playbackSource?.source_type === "none"}
-            >
-              {qualityOptions.map((quality) => (
-                <option key={quality} value={quality}>{quality}</option>
-              ))}
-            </select>
-          </label>
-          <button className="btn-secondary" onClick={handlePrepareHls} disabled={hlsBusy || hlsStatus?.status === "running"}>
-            {hlsStatus?.status === "running" ? "Preparing HLS..." : "Prepare HLS"}
-          </button>
-          {hlsStatus?.status === "completed" && playbackSource?.source_type !== "hls" && (
-            <button className="btn-secondary" onClick={handleUseHls}>Use HLS</button>
-          )}
-          {playbackSource?.source_type === "hls" && <span className="diagnostics-hint">HLS ready</span>}
-        </div>
-      </div>
+      <VideoTagsPanel videoId={video.id} onTagsChanged={handleTagsChanged} />
 
       {askResume && progress && (
         <div className="resume-banner">
@@ -306,79 +276,83 @@ export function WatchPage() {
         </div>
       )}
 
-      <div className="meta-grid">
-        <div>
-          <strong>Duration:</strong> {formatDuration(video.duration)}
-        </div>
-        <div>
-          <strong>Resolution:</strong>{" "}
-          {video.width && video.height ? `${video.width}×${video.height}` : "Unknown"}
-        </div>
-        <div>
-          <strong>Video codec:</strong> {video.video_codec ?? "Unknown"}
-        </div>
-        <div>
-          <strong>Pixel format:</strong> {video.pixel_format ?? "Unknown"}
-        </div>
-        <div>
-          <strong>Audio codec:</strong> {video.audio_codec ?? "Unknown"}
-        </div>
-        <div>
-          <strong>Container:</strong> {video.extension.toUpperCase()}
-        </div>
-        <div>
-          <strong>Container format:</strong> {video.container_format ?? "Unknown"}
-        </div>
-        <div>
-          <strong>Media status:</strong> {video.media_status ?? "Unknown"}
-        </div>
-        <div>
-          <strong>Probe status:</strong> {video.probe_status ?? "Unknown"}
-        </div>
-        <div>
-          <strong>Compatibility:</strong> {video.compatibility_status ?? "Unknown"}
-        </div>
-        <div>
-          <strong>Auto guess:</strong> {video.auto_compatibility_status ?? "Unknown"}
-        </div>
-        <div>
-          <strong>Effective status:</strong> {video.effective_compatibility_status ?? "Unknown"}
-        </div>
-        <div>
-          <strong>Source:</strong> {video.compatibility_source ?? "unknown"}
-        </div>
-        <div>
-          <strong>Manual profile status:</strong> {video.manual_playback_status ?? "not set"}
-        </div>
-        <div>
-          <strong>Thumbnail status:</strong> {video.thumbnail_status ?? "Unknown"}
-        </div>
-        <div>
-          <strong>File size:</strong> {formatSize(video.size)}
-        </div>
-        <div>
-          <strong>Filename:</strong> {video.filename}
-        </div>
-        {video.folder_path && (
-          <div>
-            <strong>Folder:</strong> {video.folder_path}
+      <div className="watch-details-grid">
+        <section className="watch-details-card">
+          <h3>File</h3>
+          <p><strong>Display title:</strong> {video.title}</p>
+          <p><strong>Filename:</strong> {video.filename}</p>
+          <p><strong>Relative path:</strong> {video.relative_path}</p>
+          <p><strong>Extension:</strong> {video.extension.toUpperCase()}</p>
+          <p><strong>File size:</strong> {formatSize(video.size)}</p>
+          {video.file_modified_at ? <p><strong>Modified:</strong> {new Date(video.file_modified_at).toLocaleString()}</p> : null}
+          <p><strong>Indexed:</strong> {new Date(video.indexed_at).toLocaleString()}</p>
+        </section>
+
+        <section className="watch-details-card">
+          <h3>Library</h3>
+          <p><strong>Media source:</strong> {video.library_root_name ?? "Unknown"}</p>
+          <p><strong>Media source ID:</strong> {video.library_root_id ?? "—"}</p>
+          {video.folder_path ? <p><strong>Folder within source:</strong> {video.folder_path}</p> : null}
+        </section>
+
+        <section className="watch-details-card">
+          <h3>Playback / HLS</h3>
+          <p><strong>Current source:</strong> {playbackSource?.source_type ?? "loading"}</p>
+          <p><strong>Source reason:</strong> {playbackSource?.reason ?? "Loading..."}</p>
+          <p>
+            <strong>HLS status:</strong> {hlsStatus?.status ?? "idle"}
+            {hlsStatus?.current_quality ? ` (${hlsStatus.current_quality})` : ""}
+            {hlsStatus?.progress_percent !== null && hlsStatus?.progress_percent !== undefined
+              ? ` - ${Math.round(hlsStatus.progress_percent)}%`
+              : ""}
+          </p>
+          {hlsStatus?.error_message ? <p className="card-warning">{hlsStatus.error_message}</p> : null}
+          <div className="media-profiles-toolbar">
+            <label>
+              Quality
+              <select
+                value={selectedQuality}
+                onChange={(event) => setSelectedQuality(event.target.value)}
+                disabled={qualityOptions.length === 0 || playbackSource?.source_type === "none"}
+              >
+                {qualityOptions.map((quality) => (
+                  <option key={quality} value={quality}>{quality}</option>
+                ))}
+              </select>
+            </label>
+            <button className="btn-secondary" onClick={handlePrepareHls} disabled={hlsBusy || hlsStatus?.status === "running"}>
+              {hlsStatus?.status === "running" ? "Preparing HLS..." : "Prepare HLS"}
+            </button>
+            {hlsStatus?.status === "completed" && playbackSource?.source_type !== "hls" ? (
+              <button className="btn-secondary" onClick={handleUseHls}>Use HLS</button>
+            ) : null}
+            {playbackSource?.source_type === "hls" ? <span className="diagnostics-hint">HLS ready</span> : null}
           </div>
-        )}
-        {video.compatibility_reason && (
-          <div className="compat-detail">
-            <strong>Compatibility note:</strong> {video.compatibility_reason}
-          </div>
-        )}
-        {video.probe_error && (
-          <div className="compat-detail">
-            <strong>Probe error:</strong> {video.probe_error}
-          </div>
-        )}
-        {video.thumbnail_error && (
-          <div className="compat-detail">
-            <strong>Thumbnail error:</strong> {video.thumbnail_error}
-          </div>
-        )}
+        </section>
+
+        <section className="watch-details-card">
+          <h3>Media / Codecs</h3>
+          <p><strong>Duration:</strong> {formatDuration(video.duration)}</p>
+          <p><strong>Resolution:</strong> {video.width && video.height ? `${video.width}×${video.height}` : "Unknown"}</p>
+          <p><strong>Container format:</strong> {video.container_format ?? "Unknown"}</p>
+          <p><strong>Video codec:</strong> {video.video_codec ?? "Unknown"}</p>
+          <p><strong>Audio codec:</strong> {video.audio_codec ?? "Unknown"}</p>
+          <p><strong>Pixel format:</strong> {video.pixel_format ?? "Unknown"}</p>
+          <p><strong>Audio channels:</strong> {video.audio_channels ?? "Unknown"}</p>
+          <p><strong>Sample rate:</strong> {video.audio_sample_rate ?? "Unknown"}</p>
+        </section>
+
+        <section className="watch-details-card">
+          <h3>Compatibility</h3>
+          <p><strong>Compatibility:</strong> {video.compatibility_status ?? "Unknown"}</p>
+          <p><strong>Effective status:</strong> {video.effective_compatibility_status ?? "Unknown"}</p>
+          <p><strong>Compatibility source:</strong> {video.compatibility_source ?? "unknown"}</p>
+          <p><strong>Media profile key:</strong> {video.media_profile_key ?? "Unknown"}</p>
+          <p><strong>Manual profile status:</strong> {video.manual_playback_status ?? "not set"}</p>
+          {video.compatibility_reason ? <p><strong>Reason:</strong> {video.compatibility_reason}</p> : null}
+          {video.probe_error ? <p><strong>Probe error:</strong> {video.probe_error}</p> : null}
+          {video.thumbnail_error ? <p><strong>Thumbnail error:</strong> {video.thumbnail_error}</p> : null}
+        </section>
       </div>
     </div>
   );

@@ -36,6 +36,7 @@ export type VideoListItem = {
   file_modified_at: string | null;
   created_at: string;
   indexed_at: string;
+  tags: VideoTagLite[];
 };
 
 export type VideoDetail = {
@@ -78,6 +79,40 @@ export type VideoDetail = {
   created_at: string;
   updated_at: string;
   indexed_at: string;
+  tags: VideoTagLite[];
+};
+
+export type VideoTagLite = {
+  id: number;
+  name: string;
+  path: string;
+  color: string | null;
+};
+
+export type VideoTag = {
+  id: number;
+  name: string;
+  path: string;
+  parent_id: number | null;
+  color: string | null;
+};
+
+export type TagItem = {
+  id: number;
+  name: string;
+  normalized_name: string;
+  parent_id: number | null;
+  path: string;
+  depth: number;
+  color: string | null;
+  description: string | null;
+  video_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TagTreeNode = TagItem & {
+  children: TagTreeNode[];
 };
 
 export type WatchProgress = {

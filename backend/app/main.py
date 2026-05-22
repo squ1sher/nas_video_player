@@ -21,6 +21,7 @@ from app.routes.media_profiles import router as media_profiles_router
 from app.routes.progress import router as progress_router
 from app.routes.scan import router as scan_router
 from app.routes.settings import router as settings_router
+from app.routes.tags import router as tags_router
 from app.routes.videos import router as videos_router
 from app.scanner import initialize_library_roots, recover_scan_runtime_state
 from app.services.hls_service import ensure_batch_worker_started, recover_hls_runtime_state
@@ -47,6 +48,7 @@ app.include_router(folders_router)
 app.include_router(duplicates_router)
 app.include_router(global_hls_router)
 app.include_router(video_hls_router)
+app.include_router(tags_router)
 app.include_router(videos_router)
 
 
