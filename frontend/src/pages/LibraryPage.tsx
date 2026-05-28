@@ -7,6 +7,8 @@ import { SearchBar } from "../components/SearchBar";
 import { SortSelect } from "../components/SortSelect";
 import { VideoCard } from "../components/VideoCard";
 import { FolderTree } from "../components/folders/FolderTree";
+import { TagFilterDialog } from "../components/tags/TagFilterDialog";
+import type { TagFilterState } from "../components/tags/TagFilterDialog";
 import { TagSelectorDialog } from "../components/tags/TagSelectorDialog";
 import type { VideoBulkDeleteResult, VideoListItem } from "../types/video";
 import { buildFolderTree } from "../utils/buildFolderTree";
@@ -29,6 +31,7 @@ type VisibleGroup = {
 
 const LIBRARY_INITIAL_ITEMS = 60;
 const LIBRARY_LOAD_MORE_ITEMS = 60;
+const MAX_ACTIVE_TAG_CHIPS = 3;
 
 function sourceLabel(video: VideoListItem): string {
   return video.library_root_name || "Unassigned source";
@@ -68,12 +71,29 @@ export function LibraryPage() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [tagFilterDialogOpen, setTagFilterDialogOpen] = useState(false);
+  const [tagFilter, setTagFilter] = useState<TagFilterState>({ selectedTagIds: [], mode: "any", withoutTags: false });
+  const [tagPathById, setTagPathById] = useState<Map<number, string>>(new Map());
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
   const [bulkDeleteResult, setBulkDeleteResult] = useState<VideoBulkDeleteResult | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const groupedVideos = useMemo(() => groupVideos(videos, { sort, order }), [videos, sort, order]);
+  const hasActiveTagFilter = tagFilter.withoutTags || tagFilter.selectedTagIds.length > 0;
+
+  const activeTagChipItems = useMemo(() => {
+    if (tagFilter.withoutTags) {
+      return [{ id: -1, label: "Without tags" }];
+    }
+    return tagFilter.selectedTagIds.map((id) => ({
+      id,
+      label: tagPathById.get(id) || `Tag #${id}`,
+    }));
+  }, [tagFilter.selectedTagIds, tagFilter.withoutTags, tagPathById]);
+
+  const visibleTagChipItems = activeTagChipItems.slice(0, MAX_ACTIVE_TAG_CHIPS);
+  const hiddenTagChipCount = Math.max(0, activeTagChipItems.length - visibleTagChipItems.length);
 
   const visibleGroupedVideos = useMemo<VisibleGroup[]>(() => {
     let remaining = visibleCount;
@@ -145,12 +165,25 @@ export function LibraryPage() {
 
   const loadAllVideos = async () => {
     const queryText = search.trim() || undefined;
-    const data = await fetchVideos({ q: queryText, sort, order });
+    const data = await fetchVideos({
+      q: queryText,
+      sort,
+      order,
+      tag_ids: tagFilter.withoutTags ? undefined : tagFilter.selectedTagIds,
+      tag_mode: tagFilter.mode,
+      without_tags: tagFilter.withoutTags,
+    });
     setVideos(data);
   };
 
   const loadFolderVideos = async () => {
-    const data = await fetchVideos({ sort, order });
+    const data = await fetchVideos({
+      sort,
+      order,
+      tag_ids: tagFilter.withoutTags ? undefined : tagFilter.selectedTagIds,
+      tag_mode: tagFilter.mode,
+      without_tags: tagFilter.withoutTags,
+    });
     setFolderVideos(data);
   };
 
@@ -182,7 +215,7 @@ export function LibraryPage() {
     return () => {
       isMounted = false;
     };
-  }, [tab, search, sort, order]);
+  }, [tab, search, sort, order, tagFilter]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -235,11 +268,51 @@ export function LibraryPage() {
 
   useEffect(() => {
     setVisibleCount(LIBRARY_INITIAL_ITEMS);
-  }, [tab, search, sort, order]);
+  }, [tab, search, sort, order, tagFilter]);
 
   const clearSelectionAndExit = () => {
     setSelectedIds(new Set());
     setSelectionMode(false);
+  };
+
+  const applyTagFilter = (
+    nextFilter: TagFilterState,
+    selectedTags: Array<{ id: number; path: string }>
+  ) => {
+    setTagFilter(nextFilter);
+    if (nextFilter.withoutTags || selectedTags.length === 0) {
+      setTagPathById(new Map());
+    } else {
+      setTagPathById(new Map(selectedTags.map((tag) => [tag.id, tag.path])));
+    }
+    if (selectionMode) {
+      clearSelectionAndExit();
+    }
+  };
+
+  const clearTagFilter = () => {
+    setTagFilter({ selectedTagIds: [], mode: "any", withoutTags: false });
+    setTagPathById(new Map());
+    if (selectionMode) {
+      clearSelectionAndExit();
+    }
+  };
+
+  const removeTagFilterChip = (tagId: number) => {
+    if (tagFilter.withoutTags) {
+      clearTagFilter();
+      return;
+    }
+    const nextIds = tagFilter.selectedTagIds.filter((id) => id !== tagId);
+    setTagFilter((prev) => ({ ...prev, selectedTagIds: nextIds }));
+    setTagPathById((prev) => {
+      const next = new Map(prev);
+      next.delete(tagId);
+      return next;
+    });
+    if (selectionMode) {
+      clearSelectionAndExit();
+    }
   };
 
   const toggleSelected = (videoId: number) => {
@@ -327,6 +400,20 @@ export function LibraryPage() {
             {menuOpen ? (
               <div className="library-menu-dropdown">
                 <button className="library-menu-item" onClick={() => navigate("/settings")}>Settings</button>
+                {hasActiveTagFilter ? (
+                  <>
+                    <button className="library-menu-item" onClick={() => { setTagFilterDialogOpen(true); setMenuOpen(false); }}>
+                      Edit tag filter
+                    </button>
+                    <button className="library-menu-item" onClick={() => { clearTagFilter(); setMenuOpen(false); }}>
+                      Clear tag filter
+                    </button>
+                  </>
+                ) : (
+                  <button className="library-menu-item" onClick={() => { setTagFilterDialogOpen(true); setMenuOpen(false); }}>
+                    Filter by tags
+                  </button>
+                )}
 
                 {!selectionMode ? (
                   <button className="library-menu-item" onClick={openSelectionMode}>Select</button>
@@ -357,6 +444,28 @@ export function LibraryPage() {
         </div>
       </header>
 
+      {hasActiveTagFilter ? (
+        <div className="library-active-filter-row">
+          {visibleTagChipItems.map((chip) => (
+            <button
+              key={chip.id}
+              className="library-active-filter-chip"
+              onClick={() => removeTagFilterChip(chip.id)}
+              title={`Remove filter: ${chip.label}`}
+            >
+              {chip.label} x
+            </button>
+          ))}
+          {hiddenTagChipCount > 0 ? <span className="library-active-filter-more">+{hiddenTagChipCount}</span> : null}
+          {!tagFilter.withoutTags ? (
+            <button className="library-active-filter-mode" onClick={() => setTagFilterDialogOpen(true)}>
+              Mode: {tagFilter.mode === "all" ? "All" : "Any"}
+            </button>
+          ) : null}
+          <button className="library-active-filter-clear" onClick={clearTagFilter}>Clear</button>
+        </div>
+      ) : null}
+
       {error && <div className="error">{error}</div>}
       {actionNotice && <div className="notice">{actionNotice}</div>}
 
@@ -365,7 +474,11 @@ export function LibraryPage() {
           {loading ? (
             <div className="status">Loading videos...</div>
           ) : videos.length === 0 ? (
-            <div className="status">No videos found. Add media sources in Settings and run a scan.</div>
+            <div className="status">
+              {hasActiveTagFilter
+                ? "No videos match the selected tag filters."
+                : "No videos found. Add media sources in Settings and run a scan."}
+            </div>
           ) : (
             <div className="video-group-list">
               {visibleGroupedVideos.map((group) => (
@@ -407,7 +520,11 @@ export function LibraryPage() {
           {folderLoading ? (
             <div className="status">Loading folders...</div>
           ) : folderTrees.length === 0 ? (
-            <div className="status">No folders found. Add media sources in Settings and run a scan.</div>
+            <div className="status">
+              {hasActiveTagFilter
+                ? "No videos match the selected tag filters."
+                : "No folders found. Add media sources in Settings and run a scan."}
+            </div>
           ) : (
             folderTrees.map((source) => {
               const prefixedExpanded = new Set(
@@ -444,6 +561,13 @@ export function LibraryPage() {
         confirmLabel="Apply tags"
         onClose={() => setTagDialogOpen(false)}
         onApply={handleBulkAssignTags}
+      />
+
+      <TagFilterDialog
+        open={tagFilterDialogOpen}
+        initialState={tagFilter}
+        onClose={() => setTagFilterDialogOpen(false)}
+        onApply={applyTagFilter}
       />
 
       {deleteDialogOpen ? (

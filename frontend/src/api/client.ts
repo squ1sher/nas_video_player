@@ -80,6 +80,9 @@ export async function fetchVideos(params: {
   media_profile_id?: number;
   compatibility_source?: string;
   effective_compatibility_status?: string;
+  tag_ids?: number[];
+  tag_mode?: "any" | "all";
+  without_tags?: boolean;
   sort?: SortField;
   order?: SortOrder;
 }): Promise<VideoListItem[]> {
@@ -96,6 +99,9 @@ export async function fetchVideos(params: {
   if (params.media_profile_id !== undefined) query.set("media_profile_id", String(params.media_profile_id));
   if (params.compatibility_source) query.set("compatibility_source", params.compatibility_source);
   if (params.effective_compatibility_status) query.set("effective_compatibility_status", params.effective_compatibility_status);
+  if (params.tag_ids && params.tag_ids.length > 0) query.set("tag_ids", params.tag_ids.join(","));
+  if (params.tag_mode) query.set("tag_mode", params.tag_mode);
+  if (params.without_tags !== undefined) query.set("without_tags", String(params.without_tags));
   if (params.sort) query.set("sort", params.sort);
   if (params.order) query.set("order", params.order);
 

@@ -2,10 +2,11 @@ import logging
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy import asc, desc, or_
+from sqlalchemy import asc, desc, func, or_
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -36,6 +37,24 @@ SORT_FIELDS = {
     "duration": Video.duration,
     "size": Video.size,
 }
+
+
+def _parse_tag_ids(raw_tag_ids: str | None) -> list[int]:
+    if not raw_tag_ids:
+        return []
+    parsed: list[int] = []
+    for chunk in raw_tag_ids.split(","):
+        token = chunk.strip()
+        if not token:
+            continue
+        try:
+            tag_id = int(token)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid tag_ids value: {token}") from exc
+        if tag_id <= 0:
+            raise HTTPException(status_code=422, detail="tag_ids must contain positive integers")
+        parsed.append(tag_id)
+    return sorted(set(parsed))
 
 
 def to_list_item(
@@ -230,12 +249,16 @@ def list_videos(
     compatibility_source: str | None = None,
     effective_compatibility_status: str | None = None,
     availability_status: str | None = None,
+    tag_ids: str | None = None,
+    tag_mode: Literal["any", "all"] = "any",
+    without_tags: bool = False,
     show_all: bool = False,
     sort: str = "created_at",
     order: str = "desc",
     db: Session = Depends(get_db),
 ) -> list[VideoListItem]:
     query = db.query(Video)
+    selected_tag_ids = _parse_tag_ids(tag_ids)
     # By default exclude source_removed, source_disabled, deleted from normal library view
     if not show_all and availability_status is None:
         query = query.filter(
@@ -280,6 +303,23 @@ def list_videos(
         query = query.filter(Video.compatibility_source == compatibility_source)
     if effective_compatibility_status:
         query = query.filter(Video.effective_compatibility_status == effective_compatibility_status)
+    if without_tags:
+        query = query.outerjoin(VideoTag, VideoTag.video_id == Video.id).filter(VideoTag.id.is_(None))
+    elif selected_tag_ids:
+        if tag_mode == "all":
+            filtered_video_ids = (
+                db.query(VideoTag.video_id)
+                .filter(VideoTag.tag_id.in_(selected_tag_ids))
+                .group_by(VideoTag.video_id)
+                .having(func.count(func.distinct(VideoTag.tag_id)) == len(selected_tag_ids))
+            )
+        else:
+            filtered_video_ids = (
+                db.query(VideoTag.video_id)
+                .filter(VideoTag.tag_id.in_(selected_tag_ids))
+                .distinct()
+            )
+        query = query.filter(Video.id.in_(filtered_video_ids))
     sort_field = SORT_FIELDS.get(sort, Video.created_at)
     sort_direction = desc if order.lower() == "desc" else asc
     videos = query.order_by(sort_direction(sort_field)).all()

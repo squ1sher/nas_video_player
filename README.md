@@ -257,9 +257,20 @@ New `availability_status` field on `Video`:
 - The Library header stays compact and uses a **Menu** for actions: `Settings`, `Select`, `Add tag to selected`, `Delete selected`.
 - In selection mode, loaded thumbnails show checkboxes, selected count is shown, and bulk actions apply to selected loaded videos.
 - After a bulk action, selection is cleared and selection mode exits.
-- Tag filtering/sorting in Library is planned for a later phase and is not included in v1.
 - Deleting a video removes its tag associations.
 - Deleting a tag removes associations for that tag but does not delete videos.
+
+### Library tag filtering (compact)
+
+- Open **Library -> Menu -> Filter by tags**.
+- The dialog supports hierarchical multi-select with three filter modes:
+  - `Any` selected tag
+  - `All` selected tags
+  - `Without tags` (videos with zero assigned tags)
+- Active filters are shown as compact chips below the header only when enabled.
+- Chips can be removed individually and `Clear` removes all tag filters.
+- Tag filtering composes with search, sort/order, grouping, folders view, and manual **Load more**.
+- Tag sorting, saved collections, and playlists are future work.
 
 
 ### Deployment folders
@@ -522,6 +533,9 @@ You do not need to edit `docker-compose.yml` for every new media subfolder; add 
 - `media_profile_id`
 - `compatibility_source`
 - `effective_compatibility_status`
+- `tag_ids=1,2,3`
+- `tag_mode=any|all` (default: `any`)
+- `without_tags=true|false`
 
 ### Watch progress
 | Method | Path | Description |
