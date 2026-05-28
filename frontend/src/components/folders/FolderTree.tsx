@@ -14,9 +14,22 @@ type Props = {
   progressByVideoId: Record<number, WatchProgress | undefined>;
   sort: SortField;
   order: SortOrder;
+  selectionMode?: boolean;
+  selectedVideoIds?: Set<number>;
+  onToggleVideoSelect?: (videoId: number) => void;
 };
 
-export function FolderTree({ root, expandedPaths, onToggle, progressByVideoId, sort, order }: Props) {
+export function FolderTree({
+  root,
+  expandedPaths,
+  onToggle,
+  progressByVideoId,
+  sort,
+  order,
+  selectionMode = false,
+  selectedVideoIds,
+  onToggleVideoSelect,
+}: Props) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const rootGroups = useMemo(() => groupVideos(root.videos, { sort, order }), [root.videos, sort, order]);
 
@@ -47,7 +60,14 @@ export function FolderTree({ root, expandedPaths, onToggle, progressByVideoId, s
                   {!isGroupCollapsed && (
                     <div className="video-grid video-grid-grouped">
                       {group.videos.map((video) => (
-                        <VideoCard key={video.id} video={video} progress={progressByVideoId[video.id]} />
+                        <VideoCard
+                          key={video.id}
+                          video={video}
+                          progress={progressByVideoId[video.id]}
+                          selectionMode={selectionMode}
+                          selected={selectedVideoIds?.has(video.id) ?? false}
+                          onToggleSelect={onToggleVideoSelect}
+                        />
                       ))}
                     </div>
                   )}
@@ -68,6 +88,9 @@ export function FolderTree({ root, expandedPaths, onToggle, progressByVideoId, s
             progressByVideoId={progressByVideoId}
             sort={sort}
             order={order}
+              selectionMode={selectionMode}
+              selectedVideoIds={selectedVideoIds}
+              onToggleVideoSelect={onToggleVideoSelect}
           />
         ))}
       </ul>

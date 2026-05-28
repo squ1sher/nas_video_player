@@ -13,6 +13,9 @@ type Props = {
   progressByVideoId: Record<number, WatchProgress | undefined>;
   sort: SortField;
   order: SortOrder;
+  selectionMode?: boolean;
+  selectedVideoIds?: Set<number>;
+  onToggleVideoSelect?: (videoId: number) => void;
 };
 
 function folderMeta(node: FolderTreeNode): string {
@@ -24,7 +27,17 @@ function folderMeta(node: FolderTreeNode): string {
   return parts.join(" - ");
 }
 
-export function FolderNode({ node, expandedPaths, onToggle, progressByVideoId, sort, order }: Props) {
+export function FolderNode({
+  node,
+  expandedPaths,
+  onToggle,
+  progressByVideoId,
+  sort,
+  order,
+  selectionMode = false,
+  selectedVideoIds,
+  onToggleVideoSelect,
+}: Props) {
   const isExpanded = expandedPaths.has(node.path);
   const canExpand = node.children.length > 0 || node.videos.length > 0;
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -67,6 +80,9 @@ export function FolderNode({ node, expandedPaths, onToggle, progressByVideoId, s
                   progressByVideoId={progressByVideoId}
                   sort={sort}
                   order={order}
+                  selectionMode={selectionMode}
+                  selectedVideoIds={selectedVideoIds}
+                  onToggleVideoSelect={onToggleVideoSelect}
                 />
               ))}
             </ul>
@@ -86,7 +102,14 @@ export function FolderNode({ node, expandedPaths, onToggle, progressByVideoId, s
                     {!isGroupCollapsed && (
                       <div className="video-grid video-grid-grouped">
                         {group.videos.map((video) => (
-                          <VideoCard key={video.id} video={video} progress={progressByVideoId[video.id]} />
+                          <VideoCard
+                            key={video.id}
+                            video={video}
+                            progress={progressByVideoId[video.id]}
+                            selectionMode={selectionMode}
+                            selected={selectedVideoIds?.has(video.id) ?? false}
+                            onToggleSelect={onToggleVideoSelect}
+                          />
                         ))}
                       </div>
                     )}

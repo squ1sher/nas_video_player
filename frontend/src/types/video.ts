@@ -115,6 +115,36 @@ export type TagTreeNode = TagItem & {
   children: TagTreeNode[];
 };
 
+export type VideoBulkDeleteFailedItem = {
+  video_id: number;
+  error: string;
+};
+
+export type VideoBulkDeleteResult = {
+  deleted: number[];
+  failed: VideoBulkDeleteFailedItem[];
+};
+
+export type TagBulkAssignResult = {
+  videos_processed: number;
+  tags_assigned: number;
+  assignments_created: number;
+  skipped: number[];
+  errors: string[];
+};
+
+export type TagTreeMove = {
+  tag_id: number;
+  new_parent_id: number | null;
+  new_name?: string;
+};
+
+export type TagTreePatchResult = {
+  status: "updated" | "no_changes";
+  updated_tags: number;
+  tree: TagTreeNode[];
+};
+
 export type WatchProgress = {
   video_id: number;
   position_seconds: number;

@@ -87,6 +87,35 @@ def _tag_counts(db: Session) -> dict[int, int]:
     return {tag_id: count for tag_id, count in rows}
 
 
+def _validate_no_cycles(parent_by_id: dict[int, int | None]) -> None:
+    for tag_id in parent_by_id:
+        seen: set[int] = set()
+        current = tag_id
+        while current is not None:
+            if current in seen:
+                raise TagError("Cannot move tag under itself or its descendant.", code="cycle_detected")
+            seen.add(current)
+            current = parent_by_id.get(current)
+
+
+def _validate_duplicate_names_under_parent(
+    tags_by_id: dict[int, Tag],
+    parent_by_id: dict[int, int | None],
+    normalized_name_by_id: dict[int, str] | None = None,
+) -> None:
+    names_by_parent: dict[int | None, set[str]] = defaultdict(set)
+    for tag_id, tag in tags_by_id.items():
+        parent_id = parent_by_id[tag_id]
+        sibling_names = names_by_parent[parent_id]
+        normalized_name = normalized_name_by_id[tag_id] if normalized_name_by_id is not None else tag.normalized_name
+        if normalized_name in sibling_names:
+            raise TagError(
+                "A tag with this name already exists under the selected parent.",
+                code="duplicate_tag_name_under_parent",
+            )
+        sibling_names.add(normalized_name)
+
+
 def list_tags_flat(db: Session) -> list[dict[str, object]]:
     counts = _tag_counts(db)
     tags = db.query(Tag).order_by(Tag.path.asc()).all()
@@ -140,6 +169,81 @@ def list_tags_tree(db: Session) -> list[dict[str, object]]:
                 parent_node["children"].append(node)
 
     return roots
+
+
+def apply_tag_tree_moves(db: Session, *, moves: list[dict[str, object]]) -> dict[str, object]:
+    tags = db.query(Tag).order_by(Tag.id.asc()).all()
+    tags_by_id = {tag.id: tag for tag in tags}
+
+    if not moves:
+        return {"status": "no_changes", "updated_tags": 0, "tree": list_tags_tree(db)}
+
+    deduped_moves: dict[int, dict[str, object]] = {}
+    for move in moves:
+        tag_id = int(move.get("tag_id", 0))
+        new_parent_id = move.get("new_parent_id")
+        if tag_id not in tags_by_id:
+            raise TagError("Tag not found.", code="tag_not_found")
+        if new_parent_id is not None and new_parent_id not in tags_by_id:
+            raise TagError("Parent tag not found.", code="parent_not_found")
+        new_name = move.get("new_name")
+        deduped_moves[tag_id] = {"new_parent_id": new_parent_id, "new_name": new_name}
+
+    parent_by_id = {tag.id: tag.parent_id for tag in tags}
+    cleaned_name_by_id = {tag.id: tag.name for tag in tags}
+    normalized_name_by_id = {tag.id: tag.normalized_name for tag in tags}
+
+    for tag_id, change in deduped_moves.items():
+        new_parent_id = change["new_parent_id"]
+        if tag_id == new_parent_id:
+            raise TagError("Cannot move tag under itself.", code="invalid_move")
+        parent_by_id[tag_id] = new_parent_id
+
+        new_name = change.get("new_name")
+        if new_name is not None:
+            cleaned_name, normalized_name = normalize_tag_name(str(new_name))
+            cleaned_name_by_id[tag_id] = cleaned_name
+            normalized_name_by_id[tag_id] = normalized_name
+
+    _validate_no_cycles(parent_by_id)
+    _validate_duplicate_names_under_parent(tags_by_id, parent_by_id, normalized_name_by_id)
+
+    old_path_by_id = {tag.id: tag.path for tag in tags}
+    old_depth_by_id = {tag.id: tag.depth for tag in tags}
+    old_name_by_id = {tag.id: tag.name for tag in tags}
+    changed_tag_ids = {
+        tag_id
+        for tag_id, change in deduped_moves.items()
+        if tags_by_id[tag_id].parent_id != change["new_parent_id"] or tags_by_id[tag_id].name != cleaned_name_by_id[tag_id]
+    }
+    if not changed_tag_ids:
+        return {"status": "no_changes", "updated_tags": 0, "tree": list_tags_tree(db)}
+
+    now = _now_utc()
+    for tag in tags:
+        next_parent_id = parent_by_id[tag.id]
+        next_name = cleaned_name_by_id[tag.id]
+        next_normalized_name = normalized_name_by_id[tag.id]
+        if tag.parent_id != next_parent_id or tag.name != next_name or tag.normalized_name != next_normalized_name:
+            tag.name = next_name
+            tag.normalized_name = next_normalized_name
+            tag.parent_id = next_parent_id
+            tag.updated_at = now
+
+    _recompute_paths(db)
+
+    updated_tags = 0
+    for tag in tags:
+        if old_path_by_id[tag.id] != tag.path or old_depth_by_id[tag.id] != tag.depth or old_name_by_id[tag.id] != tag.name or tag.id in changed_tag_ids:
+            updated_tags += 1
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise TagError("Failed to update tag tree due to a database conflict.", code="tag_conflict") from exc
+
+    return {"status": "updated", "updated_tags": updated_tags, "tree": list_tags_tree(db)}
 
 
 def create_tag(db: Session, *, name: str, parent_id: int | None, color: str | None, description: str | None) -> Tag:
@@ -327,4 +431,67 @@ def get_video_tags_map(db: Session, video_ids: list[int]) -> dict[int, list[dict
             }
         )
     return dict(tags_by_video)
+
+
+def bulk_assign_tags_to_videos(db: Session, *, video_ids: list[int], tag_ids: list[int]) -> dict[str, object]:
+    wanted_video_ids = sorted({video_id for video_id in video_ids})
+    wanted_tag_ids = sorted({tag_id for tag_id in tag_ids})
+
+    if not wanted_video_ids or not wanted_tag_ids:
+        return {
+            "videos_processed": 0,
+            "tags_assigned": len(wanted_tag_ids),
+            "assignments_created": 0,
+            "skipped": wanted_video_ids,
+            "errors": [],
+        }
+
+    existing_tag_ids = {row[0] for row in db.query(Tag.id).filter(Tag.id.in_(wanted_tag_ids)).all()}
+    missing_tags = [tag_id for tag_id in wanted_tag_ids if tag_id not in existing_tag_ids]
+    if missing_tags:
+        raise TagError(f"Tag not found: {missing_tags[0]}", code="tag_not_found")
+
+    existing_video_ids = {row[0] for row in db.query(Video.id).filter(Video.id.in_(wanted_video_ids)).all()}
+    skipped = [video_id for video_id in wanted_video_ids if video_id not in existing_video_ids]
+
+    if not existing_video_ids:
+        return {
+            "videos_processed": 0,
+            "tags_assigned": len(wanted_tag_ids),
+            "assignments_created": 0,
+            "skipped": skipped,
+            "errors": [],
+        }
+
+    existing_pairs = {
+        (video_id, tag_id)
+        for video_id, tag_id in (
+            db.query(VideoTag.video_id, VideoTag.tag_id)
+            .filter(VideoTag.video_id.in_(existing_video_ids), VideoTag.tag_id.in_(wanted_tag_ids))
+            .all()
+        )
+    }
+
+    created = 0
+    for video_id in sorted(existing_video_ids):
+        for tag_id in wanted_tag_ids:
+            if (video_id, tag_id) in existing_pairs:
+                continue
+            db.add(VideoTag(video_id=video_id, tag_id=tag_id))
+            created += 1
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise TagError("Failed to update video tags due to a database conflict.", code="tag_conflict") from exc
+
+    return {
+        "videos_processed": len(existing_video_ids),
+        "tags_assigned": len(wanted_tag_ids),
+        "assignments_created": created,
+        "skipped": skipped,
+        "errors": [],
+    }
+
 

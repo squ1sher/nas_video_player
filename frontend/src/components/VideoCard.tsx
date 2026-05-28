@@ -3,26 +3,48 @@ import type { VideoListItem, WatchProgress } from "../types/video";
 type Props = {
   video: VideoListItem;
   progress?: WatchProgress | null;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (videoId: number) => void;
 };
 
 
-export function VideoCard({ video, progress }: Props) {
+export function VideoCard({
+  video,
+  progress,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+}: Props) {
   void progress;
 
-  return (
-    <a
-      className="video-card video-card-minimal"
-      href={`/watch/${video.id}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={video.title}
-    >
+  const cardClassName = `video-card video-card-minimal${selected ? " video-card-selected" : ""}${
+    selectionMode ? " video-card-selection-mode" : ""
+  }`;
+
+  const handleToggle = () => {
+    onToggleSelect?.(video.id);
+  };
+
+  const content = (
+    <>
       <div className="thumb-wrap">
         {video.thumbnail_url ? (
           <img src={video.thumbnail_url} alt={video.title} className="thumb" loading="lazy" decoding="async" />
         ) : (
           <div className="thumb placeholder">No Thumbnail</div>
         )}
+
+        {selectionMode ? (
+          <label
+            className="video-select-checkbox"
+            onClick={(event) => event.stopPropagation()}
+            title={selected ? "Deselect video" : "Select video"}
+          >
+            <input type="checkbox" checked={selected} onChange={handleToggle} />
+          </label>
+        ) : null}
+
         <div className="thumb-title-overlay" aria-hidden="true">
           {video.tags.length > 0 ? (
             <div className="thumb-tags-row">
@@ -34,6 +56,26 @@ export function VideoCard({ video, progress }: Props) {
           <span className="thumb-title-text">{video.title}</span>
         </div>
       </div>
+    </>
+  );
+
+  if (selectionMode) {
+    return (
+      <button type="button" className={cardClassName} onClick={handleToggle} title={video.title}>
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <a
+      className={cardClassName}
+      href={`/watch/${video.id}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={video.title}
+    >
+      {content}
     </a>
   );
 }

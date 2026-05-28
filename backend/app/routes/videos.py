@@ -12,7 +12,7 @@ from app.config import Settings, get_settings
 from app.database import get_db
 from app.media_probe import probe_video
 from app.models import DuplicateCandidateItem, HlsJob, LibraryRoot, MediaProfile, Video, VideoTag, VideoVariant, WatchProgress
-from app.schemas import VideoDetail, VideoListItem, VideoTagAssignIn, VideoTagOut
+from app.schemas import VideoBulkDeleteIn, VideoBulkDeleteOut, VideoDetail, VideoListItem, VideoTagAssignIn, VideoTagOut
 from app.services.library_root_service import resolve_video_source_path
 from app.services.media_profile_service import (
     assign_profile_to_video,
@@ -150,6 +150,69 @@ def _library_root_name_for_video(db: Session, video: Video) -> str | None:
         return None
     root = db.query(LibraryRoot).filter(LibraryRoot.id == video.library_root_id).first()
     return root.name if root else None
+
+
+def _delete_video_and_related(
+    db: Session,
+    *,
+    video: Video,
+    settings: Settings,
+    delete_file: bool,
+) -> None:
+    if delete_file:
+        video_path = resolve_video_source_path(video, settings)
+
+        if video_path.exists() and video_path.is_file():
+            try:
+                video_path.unlink()
+            except OSError as exc:
+                logger.warning("Failed to delete source file video id=%s: %s", video.id, exc)
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Failed to delete source file. "
+                        "Check Docker volume mode and Synology permissions."
+                    ),
+                ) from exc
+
+    # Delete HLS cache folder (best-effort; log warning on failure)
+    hls_dir = settings.hls_output_path.resolve() / str(video.id)
+    if hls_dir.exists() and hls_dir.is_dir():
+        try:
+            shutil.rmtree(hls_dir)
+            logger.info("Deleted HLS cache for video_id=%s", video.id)
+        except OSError as exc:
+            logger.warning("Failed to delete HLS cache for video_id=%s: %s", video.id, exc)
+
+    # Delete thumbnail file (best-effort)
+    if video.thumbnail_path:
+        thumb_path = settings.thumbnails_path / video.thumbnail_path
+        if thumb_path.exists():
+            try:
+                thumb_path.unlink()
+                logger.info("Deleted thumbnail for video_id=%s", video.id)
+            except OSError as exc:
+                logger.warning("Failed to delete thumbnail for video_id=%s: %s", video.id, exc)
+
+    # Mark active HLS jobs as failed so background workers stop gracefully
+    now = datetime.now(timezone.utc)
+    active_jobs = db.query(HlsJob).filter(
+        HlsJob.video_id == video.id,
+        HlsJob.status.in_(["pending", "running"]),
+    ).all()
+    for job in active_jobs:
+        job.status = "failed"
+        job.error_message = "Video deleted by user."
+        job.finished_at = now
+
+    # Explicitly delete related records (SQLite FK enforcement may be disabled)
+    db.query(WatchProgress).filter(WatchProgress.video_id == video.id).delete()
+    db.query(VideoVariant).filter(VideoVariant.video_id == video.id).delete()
+    db.query(DuplicateCandidateItem).filter(DuplicateCandidateItem.video_id == video.id).delete()
+    db.query(VideoTag).filter(VideoTag.video_id == video.id).delete()
+
+    db.flush()
+    db.delete(video)
 
 
 @router.get("", response_model=list[VideoListItem])
@@ -464,62 +527,40 @@ def delete_video(
     """Delete video from index and remove source file, HLS cache, thumbnail, and related records."""
     video = get_video_or_404(db, video_id)
 
-    if delete_file:
-        video_path = resolve_video_source_path(video, settings)
-
-        if video_path.exists() and video_path.is_file():
-            try:
-                video_path.unlink()
-            except OSError as exc:
-                logger.warning("Failed to delete source file video id=%s: %s", video_id, exc)
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        "Failed to delete source file. "
-                        "Check Docker volume mode and Synology permissions."
-                    ),
-                ) from exc
-
-    # Delete HLS cache folder (best-effort; log warning on failure)
-    hls_dir = settings.hls_output_path.resolve() / str(video_id)
-    if hls_dir.exists() and hls_dir.is_dir():
-        try:
-            shutil.rmtree(hls_dir)
-            logger.info("Deleted HLS cache for video_id=%s", video_id)
-        except OSError as exc:
-            logger.warning("Failed to delete HLS cache for video_id=%s: %s", video_id, exc)
-
-    # Delete thumbnail file (best-effort)
-    if video.thumbnail_path:
-        thumb_path = settings.thumbnails_path / video.thumbnail_path
-        if thumb_path.exists():
-            try:
-                thumb_path.unlink()
-                logger.info("Deleted thumbnail for video_id=%s", video_id)
-            except OSError as exc:
-                logger.warning("Failed to delete thumbnail for video_id=%s: %s", video_id, exc)
-
-    # Mark active HLS jobs as failed so background workers stop gracefully
-    now = datetime.now(timezone.utc)
-    active_jobs = db.query(HlsJob).filter(
-        HlsJob.video_id == video_id,
-        HlsJob.status.in_(["pending", "running"]),
-    ).all()
-    for job in active_jobs:
-        job.status = "failed"
-        job.error_message = "Video deleted by user."
-        job.finished_at = now
-
-    # Explicitly delete related records (SQLite FK enforcement may be disabled)
-    db.query(WatchProgress).filter(WatchProgress.video_id == video_id).delete()
-    db.query(VideoVariant).filter(VideoVariant.video_id == video_id).delete()
-    db.query(DuplicateCandidateItem).filter(DuplicateCandidateItem.video_id == video_id).delete()
-    db.query(VideoTag).filter(VideoTag.video_id == video_id).delete()
-
-    db.flush()
-    db.delete(video)
+    _delete_video_and_related(db, video=video, settings=settings, delete_file=delete_file)
     db.commit()
     return {"deleted": True}
+
+
+@router.post("/bulk-delete", response_model=VideoBulkDeleteOut)
+def bulk_delete_videos(
+    body: VideoBulkDeleteIn,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> VideoBulkDeleteOut:
+    deleted: list[int] = []
+    failed: list[dict[str, object]] = []
+
+    for video_id in sorted({video_id for video_id in body.video_ids}):
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if video is None:
+            failed.append({"video_id": video_id, "error": "Video not found."})
+            continue
+
+        try:
+            _delete_video_and_related(db, video=video, settings=settings, delete_file=True)
+            db.commit()
+            deleted.append(video_id)
+        except HTTPException as exc:
+            db.rollback()
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            failed.append({"video_id": video_id, "error": detail})
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            db.rollback()
+            logger.exception("Unexpected error during bulk delete for video id=%s", video_id)
+            failed.append({"video_id": video_id, "error": str(exc)})
+
+    return VideoBulkDeleteOut(deleted=deleted, failed=failed)
 
 
 @router.get("/{video_id}/stream")

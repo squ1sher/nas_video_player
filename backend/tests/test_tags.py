@@ -221,3 +221,134 @@ def test_legacy_global_unique_tag_schema_is_repaired(tmp_path: Path) -> None:
         assert second_alex.parent_id == work.id
 
 
+def test_patch_tag_tree_moves_to_new_parent_and_root(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    family_id = client.post("/api/tags", json={"name": "Family"}).json()["id"]
+    travel_id = client.post("/api/tags", json={"name": "Travel"}).json()["id"]
+    spain_id = client.post("/api/tags", json={"name": "Spain", "parent_id": travel_id}).json()["id"]
+    mallorca_id = client.post("/api/tags", json={"name": "Mallorca", "parent_id": spain_id}).json()["id"]
+
+    move_under_family = client.patch("/api/tags/tree", json={"moves": [{"tag_id": spain_id, "new_parent_id": family_id}]})
+    assert move_under_family.status_code == 200
+    payload = move_under_family.json()
+    assert payload["status"] == "updated"
+    assert payload["updated_tags"] >= 2
+    moved_spain = next(node for node in payload["tree"][0]["children"] if node["id"] == spain_id)
+    assert moved_spain["path"] == "Family/Spain"
+    assert moved_spain["children"][0]["path"] == "Family/Spain/Mallorca"
+
+    move_to_root = client.patch("/api/tags/tree", json={"moves": [{"tag_id": mallorca_id, "new_parent_id": None}]})
+    assert move_to_root.status_code == 200
+    roots = [node["path"] for node in move_to_root.json()["tree"]]
+    assert "Mallorca" in roots
+
+
+def test_patch_tag_tree_rejects_self_and_descendant_moves(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    travel_id = client.post("/api/tags", json={"name": "Travel"}).json()["id"]
+    spain_id = client.post("/api/tags", json={"name": "Spain", "parent_id": travel_id}).json()["id"]
+    mallorca_id = client.post("/api/tags", json={"name": "Mallorca", "parent_id": spain_id}).json()["id"]
+
+    self_move = client.patch("/api/tags/tree", json={"moves": [{"tag_id": spain_id, "new_parent_id": spain_id}]})
+    assert self_move.status_code == 409
+
+    descendant_move = client.patch("/api/tags/tree", json={"moves": [{"tag_id": travel_id, "new_parent_id": mallorca_id}]})
+    assert descendant_move.status_code == 409
+
+
+def test_patch_tag_tree_rejects_duplicate_name_under_same_parent_and_is_atomic(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    family_id = client.post("/api/tags", json={"name": "Family"}).json()["id"]
+    travel_id = client.post("/api/tags", json={"name": "Travel"}).json()["id"]
+    alex_family_id = client.post("/api/tags", json={"name": "Alex", "parent_id": family_id}).json()["id"]
+    alex_travel_id = client.post("/api/tags", json={"name": "Alex", "parent_id": travel_id}).json()["id"]
+    spain_id = client.post("/api/tags", json={"name": "Spain", "parent_id": travel_id}).json()["id"]
+
+    # First move is valid, second introduces duplicate sibling name under Family.
+    response = client.patch(
+        "/api/tags/tree",
+        json={
+            "moves": [
+                {"tag_id": spain_id, "new_parent_id": family_id},
+                {"tag_id": alex_travel_id, "new_parent_id": family_id},
+            ]
+        },
+    )
+    assert response.status_code == 409
+
+    tree_after = client.get("/api/tags/tree")
+    assert tree_after.status_code == 200
+    travel_node = next(node for node in tree_after.json() if node["id"] == travel_id)
+    assert any(child["id"] == spain_id for child in travel_node["children"])
+    family_node = next(node for node in tree_after.json() if node["id"] == family_id)
+    assert any(child["id"] == alex_family_id for child in family_node["children"])
+    assert not any(child["id"] == alex_travel_id for child in family_node["children"])
+
+
+def test_patch_tag_tree_keeps_video_links_and_updates_video_tag_paths(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    video_id = _create_video(tmp_path, relative_path="Travel/clip2.mp4")
+
+    travel_id = client.post("/api/tags", json={"name": "Travel"}).json()["id"]
+    spain_id = client.post("/api/tags", json={"name": "Spain", "parent_id": travel_id}).json()["id"]
+    mallorca_id = client.post("/api/tags", json={"name": "Mallorca", "parent_id": spain_id}).json()["id"]
+    family_id = client.post("/api/tags", json={"name": "Family"}).json()["id"]
+
+    assign = client.post(f"/api/videos/{video_id}/tags", json={"tag_ids": [mallorca_id]})
+    assert assign.status_code == 200
+    assert assign.json()[0]["path"] == "Travel/Spain/Mallorca"
+
+    move = client.patch("/api/tags/tree", json={"moves": [{"tag_id": spain_id, "new_parent_id": family_id}]})
+    assert move.status_code == 200
+
+    tags_after_move = client.get(f"/api/videos/{video_id}/tags")
+    assert tags_after_move.status_code == 200
+    assert tags_after_move.json()[0]["id"] == mallorca_id
+    assert tags_after_move.json()[0]["path"] == "Family/Spain/Mallorca"
+
+
+def test_patch_tag_tree_renames_tag_and_updates_descendants_and_video_paths(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    video_id = _create_video(tmp_path, relative_path="Travel/clip3.mp4")
+
+    travel_id = client.post("/api/tags", json={"name": "Travel"}).json()["id"]
+    spain_id = client.post("/api/tags", json={"name": "Spain", "parent_id": travel_id}).json()["id"]
+    mallorca_id = client.post("/api/tags", json={"name": "Mallorca", "parent_id": spain_id}).json()["id"]
+
+    assign = client.post(f"/api/videos/{video_id}/tags", json={"tag_ids": [mallorca_id]})
+    assert assign.status_code == 200
+
+    rename = client.patch("/api/tags/tree", json={"moves": [{"tag_id": spain_id, "new_parent_id": travel_id, "new_name": "Spain 2025"}]})
+    assert rename.status_code == 200
+    payload = rename.json()
+    renamed_spain = payload["tree"][0]["children"][0]
+    assert renamed_spain["name"] == "Spain 2025"
+    assert renamed_spain["path"] == "Travel/Spain 2025"
+    assert renamed_spain["children"][0]["path"] == "Travel/Spain 2025/Mallorca"
+
+    tags_after_rename = client.get(f"/api/videos/{video_id}/tags")
+    assert tags_after_rename.status_code == 200
+    assert tags_after_rename.json()[0]["id"] == mallorca_id
+    assert tags_after_rename.json()[0]["path"] == "Travel/Spain 2025/Mallorca"
+
+
+def test_patch_tag_tree_rejects_duplicate_rename_under_same_parent(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    travel_id = client.post("/api/tags", json={"name": "Travel"}).json()["id"]
+    first_id = client.post("/api/tags", json={"name": "Spain", "parent_id": travel_id}).json()["id"]
+    second_id = client.post("/api/tags", json={"name": "Mallorca", "parent_id": travel_id}).json()["id"]
+
+    rename = client.patch("/api/tags/tree", json={"moves": [{"tag_id": second_id, "new_parent_id": travel_id, "new_name": "Spain"}]})
+    assert rename.status_code == 409
+
+    tree_after = client.get("/api/tags/tree")
+    assert tree_after.status_code == 200
+    travel_children = tree_after.json()[0]["children"]
+    assert any(child["id"] == first_id and child["name"] == "Spain" for child in travel_children)
+    assert any(child["id"] == second_id and child["name"] == "Mallorca" for child in travel_children)
+
+

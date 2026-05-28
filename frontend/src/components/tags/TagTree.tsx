@@ -10,6 +10,16 @@ type Props = {
   onSelectNode?: (tagId: number) => void;
   selectedNodeId?: number | null;
   showVideoCount?: boolean;
+  draggableMode?: boolean;
+  onDragStartTag?: (tagId: number) => void;
+  onDropOnTag?: (targetTagId: number) => void;
+  canDropOnTag?: (targetTagId: number) => boolean;
+  editingTagId?: number | null;
+  editingName?: string;
+  onBeginRename?: (tagId: number) => void;
+  onEditingNameChange?: (value: string) => void;
+  onCommitRename?: () => void;
+  onCancelRename?: () => void;
 };
 
 export function TagTree({
@@ -22,6 +32,16 @@ export function TagTree({
   onSelectNode,
   selectedNodeId,
   showVideoCount = false,
+  draggableMode = false,
+  onDragStartTag,
+  onDropOnTag,
+  canDropOnTag,
+  editingTagId,
+  editingName,
+  onBeginRename,
+  onEditingNameChange,
+  onCommitRename,
+  onCancelRename,
 }: Props) {
   return (
     <ul className="tag-tree-list">
@@ -31,6 +51,7 @@ export function TagTree({
         const selected = selectedIds?.has(node.id) ?? false;
         const disabled = disabledIds?.has(node.id) ?? false;
         const selectedNode = selectedNodeId === node.id;
+        const isEditing = editingTagId === node.id;
 
         return (
           <li key={node.id} className="tag-tree-node">
@@ -54,15 +75,51 @@ export function TagTree({
                 />
               )}
 
-              <button
-                type="button"
-                className="tag-tree-name"
-                onClick={() => onSelectNode?.(node.id)}
-                title={node.path}
-              >
-                {node.name}
-                {showVideoCount ? <span className="tag-tree-count">({node.video_count})</span> : null}
-              </button>
+              {isEditing ? (
+                <input
+                  className="tag-tree-inline-input"
+                  value={editingName ?? ""}
+                  autoFocus
+                  onChange={(event) => onEditingNameChange?.(event.target.value)}
+                  onClick={(event) => event.stopPropagation()}
+                  onBlur={() => onCommitRename?.()}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      onCommitRename?.();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      onCancelRename?.();
+                    }
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="tag-tree-name"
+                  onClick={() => onSelectNode?.(node.id)}
+                  onDoubleClick={() => {
+                    if (draggableMode) onBeginRename?.(node.id);
+                  }}
+                  title={node.path}
+                  draggable={draggableMode}
+                  onDragStart={() => onDragStartTag?.(node.id)}
+                  onDragOver={(event) => {
+                    if (!draggableMode) return;
+                    if (canDropOnTag && !canDropOnTag(node.id)) return;
+                    event.preventDefault();
+                  }}
+                  onDrop={(event) => {
+                    if (!draggableMode || !onDropOnTag) return;
+                    event.preventDefault();
+                    onDropOnTag(node.id);
+                  }}
+                >
+                  {node.name}
+                  {showVideoCount ? <span className="tag-tree-count">({node.video_count})</span> : null}
+                </button>
+              )}
             </div>
 
             {hasChildren && expanded && (
@@ -76,6 +133,16 @@ export function TagTree({
                 onSelectNode={onSelectNode}
                 selectedNodeId={selectedNodeId}
                 showVideoCount={showVideoCount}
+                draggableMode={draggableMode}
+                onDragStartTag={onDragStartTag}
+                onDropOnTag={onDropOnTag}
+                canDropOnTag={canDropOnTag}
+                editingTagId={editingTagId}
+                editingName={editingName}
+                onBeginRename={onBeginRename}
+                onEditingNameChange={onEditingNameChange}
+                onCommitRename={onCommitRename}
+                onCancelRename={onCancelRename}
               />
             )}
           </li>

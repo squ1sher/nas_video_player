@@ -244,9 +244,19 @@ New `availability_status` field on `Video`:
 ### Hierarchical tags (v1)
 
 - Tags are assigned from the **Watch** page (above the player).
+- The **Add tags** dialog now includes **Create new tag** inside the same flow, so missing tags can be created and assigned immediately.
+- The **Add tags** dialog also includes an **Edit** mode for hierarchy changes:
+  - drag a tag onto another tag to move it under that parent
+  - drop a tag into the `Root level` area to move it to top-level
+  - double-click a tag name to rename it inline before saving
+  - changes stay local until **Save** and are discarded on **Cancel**
+  - **Save** updates `parent_id`, recalculates `path`/`depth`, and keeps `video_tags` links by `tag_id`
 - Tags are hierarchical (for example `Family/Alex`, `Travel/Spain/Mallorca`) and can be nested to any depth.
 - **Settings -> Tags** manages the global tag tree (create child tags, rename, move, delete leaf tags).
-- Library cards do not edit tags; they only display assigned tag paths in the hover overlay.
+- Library cards do not edit tags directly; they only display assigned tag paths in the hover overlay.
+- The Library header stays compact and uses a **Menu** for actions: `Settings`, `Select`, `Add tag to selected`, `Delete selected`.
+- In selection mode, loaded thumbnails show checkboxes, selected count is shown, and bulk actions apply to selected loaded videos.
+- After a bulk action, selection is cleared and selection mode exits.
 - Tag filtering/sorting in Library is planned for a later phase and is not included in v1.
 - Deleting a video removes its tag associations.
 - Deleting a tag removes associations for that tag but does not delete videos.

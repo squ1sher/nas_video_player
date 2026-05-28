@@ -157,6 +157,20 @@ class VideoTagAssignIn(BaseModel):
     tag_ids: list[int]
 
 
+class VideoBulkDeleteIn(BaseModel):
+    video_ids: list[int]
+
+
+class VideoBulkDeleteFailedItem(BaseModel):
+    video_id: int
+    error: str
+
+
+class VideoBulkDeleteOut(BaseModel):
+    deleted: list[int]
+    failed: list[VideoBulkDeleteFailedItem]
+
+
 class TagCreateIn(BaseModel):
     name: str
     parent_id: int | None = None
@@ -187,6 +201,35 @@ class TagOut(BaseModel):
 
 class TagTreeOut(TagOut):
     children: list["TagTreeOut"] = Field(default_factory=list)
+
+
+class TagTreeMoveIn(BaseModel):
+    tag_id: int
+    new_parent_id: int | None = None
+    new_name: str | None = None
+
+
+class TagTreePatchIn(BaseModel):
+    moves: list[TagTreeMoveIn] = Field(default_factory=list)
+
+
+class TagTreePatchOut(BaseModel):
+    status: str
+    updated_tags: int = 0
+    tree: list[TagTreeOut] = Field(default_factory=list)
+
+
+class TagBulkAssignIn(BaseModel):
+    video_ids: list[int]
+    tag_ids: list[int]
+
+
+class TagBulkAssignOut(BaseModel):
+    videos_processed: int
+    tags_assigned: int
+    assignments_created: int
+    skipped: list[int] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
 
 
 class WatchProgressIn(BaseModel):

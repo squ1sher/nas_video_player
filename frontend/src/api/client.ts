@@ -29,12 +29,16 @@ import type {
   ScanStartedResponse,
   ScanStatus,
   TagItem,
+  TagTreeMove,
+  TagTreePatchResult,
   TagTreeNode,
   VideoDetail,
   VideoListItem,
+  VideoBulkDeleteResult,
   VideoTag,
   VideoWithProgress,
   WatchProgress,
+  TagBulkAssignResult,
 } from "../types/video";
 
 const API_BASE = "/api";
@@ -333,9 +337,29 @@ export async function deleteVideo(videoId: number): Promise<{ deleted: boolean }
   );
 }
 
+export async function bulkDeleteVideos(videoIds: number[]): Promise<VideoBulkDeleteResult> {
+  return handleResponse<VideoBulkDeleteResult>(
+    await fetch(`${API_BASE}/videos/bulk-delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_ids: videoIds }),
+    })
+  );
+}
+
 export async function getTagTree(): Promise<TagTreeNode[]> {
   return handleResponse<TagTreeNode[]>(
     await fetch(`${API_BASE}/tags/tree?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function patchTagTree(moves: TagTreeMove[]): Promise<TagTreePatchResult> {
+  return handleResponse<TagTreePatchResult>(
+    await fetch(`${API_BASE}/tags/tree`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ moves }),
+    })
   );
 }
 
@@ -418,6 +442,16 @@ export async function removeVideoTag(videoId: number, tagId: number): Promise<{ 
   return handleResponse<{ deleted: boolean }>(
     await fetch(`${API_BASE}/videos/${videoId}/tags/${tagId}`, {
       method: "DELETE",
+    })
+  );
+}
+
+export async function bulkAssignTags(videoIds: number[], tagIds: number[]): Promise<TagBulkAssignResult> {
+  return handleResponse<TagBulkAssignResult>(
+    await fetch(`${API_BASE}/tags/bulk-assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_ids: videoIds, tag_ids: tagIds }),
     })
   );
 }

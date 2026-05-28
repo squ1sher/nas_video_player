@@ -2,8 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas import TagCreateIn, TagOut, TagTreeOut, TagUpdateIn
-from app.services.tag_service import TagError, create_tag, delete_tag, list_tags_flat, list_tags_tree, update_tag
+from app.schemas import TagBulkAssignIn, TagBulkAssignOut, TagCreateIn, TagOut, TagTreeOut, TagTreePatchIn, TagTreePatchOut, TagUpdateIn
+from app.services.tag_service import (
+    TagError,
+    apply_tag_tree_moves,
+    bulk_assign_tags_to_videos,
+    create_tag,
+    delete_tag,
+    list_tags_flat,
+    list_tags_tree,
+    update_tag,
+)
 
 router = APIRouter(prefix="/api/tags", tags=["tags"])
 
@@ -24,6 +33,23 @@ def get_tags(db: Session = Depends(get_db)) -> list[TagOut]:
 @router.get("/tree", response_model=list[TagTreeOut])
 def get_tag_tree(db: Session = Depends(get_db)) -> list[TagTreeOut]:
     return _to_tree(list_tags_tree(db))
+
+
+@router.patch("/tree", response_model=TagTreePatchOut)
+def patch_tag_tree(body: TagTreePatchIn, db: Session = Depends(get_db)) -> TagTreePatchOut:
+    try:
+        payload = apply_tag_tree_moves(
+            db,
+            moves=[
+                {"tag_id": move.tag_id, "new_parent_id": move.new_parent_id, "new_name": move.new_name}
+                for move in body.moves
+            ],
+        )
+        return TagTreePatchOut(status=str(payload["status"]), updated_tags=int(payload["updated_tags"]), tree=_to_tree(payload["tree"]))
+    except TagError as exc:
+        db.rollback()
+        status_code = 404 if exc.code in {"tag_not_found", "parent_not_found"} else 409
+        raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
 
 
 @router.post("", response_model=TagOut, status_code=201)
@@ -97,4 +123,15 @@ def delete_tag_route(
     except TagError as exc:
         status_code = 404 if exc.code == "tag_not_found" else 409
         raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+@router.post("/bulk-assign", response_model=TagBulkAssignOut)
+def bulk_assign_tags_route(body: TagBulkAssignIn, db: Session = Depends(get_db)) -> TagBulkAssignOut:
+    try:
+        payload = bulk_assign_tags_to_videos(db, video_ids=body.video_ids, tag_ids=body.tag_ids)
+        return TagBulkAssignOut(**payload)
+    except TagError as exc:
+        status_code = 404 if exc.code == "tag_not_found" else 409
+        raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+
 
