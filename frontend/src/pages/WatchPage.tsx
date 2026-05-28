@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   deleteVideo,
   fetchVideo,
+  getPlaylist,
   getPlaybackSource,
   getVideoHlsStatus,
   getDownloadUrl,
@@ -15,7 +16,7 @@ import { CompatibilityBadge } from "../components/CompatibilityBadge";
 import { VideoTagsPanel } from "../components/tags/VideoTagsPanel";
 import { VideoPlayer } from "../components/VideoPlayer";
 import type { VideoTag } from "../types/video";
-import type { HlsVideoStatus, PlaybackSource, VideoDetail, WatchProgress } from "../types/video";
+import type { HlsVideoStatus, PlaybackSource, PlaylistDetail, VideoDetail, WatchProgress } from "../types/video";
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return "Unknown";
@@ -41,6 +42,10 @@ function formatSize(bytes: number): string {
 
 export function WatchPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const playlistIdParam = searchParams.get("playlist_id");
+  const playlistId = playlistIdParam ? Number(playlistIdParam) : null;
   const [video, setVideo] = useState<VideoDetail | null>(null);
   const [progress, setProgress] = useState<WatchProgress | null>(null);
   const [initialPosition, setInitialPosition] = useState<number>(0);
@@ -56,6 +61,7 @@ export function WatchPage() {
   const [hlsBusy, setHlsBusy] = useState(false);
   const [selectedQuality, setSelectedQuality] = useState("auto");
   const [playerQualities, setPlayerQualities] = useState<string[]>([]);
+  const [playlist, setPlaylist] = useState<PlaylistDetail | null>(null);
 
   const loadPlaybackData = useCallback(async (videoId: number) => {
     const [source, status] = await Promise.all([getPlaybackSource(videoId), getVideoHlsStatus(videoId)]);
@@ -76,6 +82,12 @@ export function WatchPage() {
         const [vid, prog] = await Promise.all([fetchVideo(id), getProgress(numericId)]);
         setVideo(vid);
         setProgress(prog);
+        if (playlistId && Number.isFinite(playlistId)) {
+          const playlistDetail = await getPlaylist(playlistId);
+          setPlaylist(playlistDetail);
+        } else {
+          setPlaylist(null);
+        }
         await loadPlaybackData(numericId);
         // Show resume prompt if position is meaningful and not completed
         if (prog.position_seconds > 5 && !prog.completed) {
@@ -88,7 +100,7 @@ export function WatchPage() {
       }
     }
     void load();
-  }, [id, loadPlaybackData]);
+  }, [id, loadPlaybackData, playlistId]);
 
   useEffect(() => {
     if (!video) return;
@@ -123,6 +135,12 @@ export function WatchPage() {
     }
     setSelectedQuality("original");
   }, [playbackSource]);
+
+  const playlistPosition = useMemo(() => {
+    if (!playlist || !video) return { index: -1, total: 0 };
+    const index = playlist.items.findIndex((item) => item.id === video.id);
+    return { index, total: playlist.items.length };
+  }, [playlist, video]);
 
   if (loading) return <div className="page status">Loading video…</div>;
   if (error || !video) return <div className="page error">{error ?? "Video not found"}</div>;
@@ -222,6 +240,17 @@ export function WatchPage() {
     });
   };
 
+
+  const goPlaylistRelative = (direction: -1 | 1) => {
+    if (!playlist || !video) return;
+    const idx = playlist.items.findIndex((item) => item.id === video.id);
+    if (idx < 0) return;
+    const nextIdx = idx + direction;
+    if (nextIdx < 0 || nextIdx >= playlist.items.length) return;
+    const nextVideoId = playlist.items[nextIdx].id;
+    navigate(`/watch/${nextVideoId}?playlist_id=${playlist.id}`);
+  };
+
   return (
     <div className="page watch-page">
       <div className="watch-header">
@@ -251,6 +280,24 @@ export function WatchPage() {
       </div>
 
       {actionMessage && <div className="notice">{actionMessage}</div>}
+      {playlist && playlistPosition.index >= 0 ? (
+        <div className="watch-playlist-strip">
+          <div>
+            <strong>{playlist.name}</strong>
+            <span className="watch-playlist-meta"> {playlistPosition.index + 1} / {playlistPosition.total}</span>
+          </div>
+          <div className="watch-playlist-actions">
+            <button className="btn-secondary" onClick={() => goPlaylistRelative(-1)} disabled={playlistPosition.index <= 0}>Previous</button>
+            <button
+              className="btn-secondary"
+              onClick={() => goPlaylistRelative(1)}
+              disabled={playlistPosition.index < 0 || playlistPosition.index >= playlistPosition.total - 1}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
       <VideoTagsPanel videoId={video.id} onTagsChanged={handleTagsChanged} />
 
       {askResume && progress && (

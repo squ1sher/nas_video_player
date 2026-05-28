@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.media_probe import probe_video
-from app.models import DuplicateCandidateItem, HlsJob, LibraryRoot, MediaProfile, Video, VideoTag, VideoVariant, WatchProgress
+from app.models import DuplicateCandidateItem, HlsJob, LibraryRoot, MediaProfile, PlaylistItem, Video, VideoTag, VideoVariant, WatchProgress
 from app.schemas import VideoBulkDeleteIn, VideoBulkDeleteOut, VideoDetail, VideoListItem, VideoTagAssignIn, VideoTagOut
 from app.services.library_root_service import resolve_video_source_path
 from app.services.media_profile_service import (
@@ -21,6 +21,7 @@ from app.services.media_profile_service import (
     compute_auto_compatibility,
     upsert_media_profile,
 )
+from app.services.playlist_service import remove_video_from_all_playlists
 from app.streaming import RangeError, iter_file_chunks, parse_range_header
 from app.services.tag_service import TagError, assign_video_tags, get_video_tags, get_video_tags_map, remove_video_tag
 from app.thumbnails import generate_thumbnail
@@ -229,6 +230,9 @@ def _delete_video_and_related(
     db.query(VideoVariant).filter(VideoVariant.video_id == video.id).delete()
     db.query(DuplicateCandidateItem).filter(DuplicateCandidateItem.video_id == video.id).delete()
     db.query(VideoTag).filter(VideoTag.video_id == video.id).delete()
+    # Keep playlist order stable even when SQLite foreign keys are disabled.
+    if db.query(PlaylistItem.id).filter(PlaylistItem.video_id == video.id).first() is not None:
+        remove_video_from_all_playlists(db, video_id=video.id)
 
     db.flush()
     db.delete(video)

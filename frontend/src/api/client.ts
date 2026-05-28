@@ -25,6 +25,10 @@ import type {
   MediaSourceBrowseItem,
   ManualPlaybackStatus,
   PathValidationResult,
+  PlaylistAddItemsResult,
+  PlaylistBulkRemoveResult,
+  PlaylistDetail,
+  PlaylistSummary,
   PlaybackSource,
   ScanStartedResponse,
   ScanStatus,
@@ -458,6 +462,85 @@ export async function bulkAssignTags(videoIds: number[], tagIds: number[]): Prom
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ video_ids: videoIds, tag_ids: tagIds }),
+    })
+  );
+}
+
+export async function getPlaylists(): Promise<PlaylistSummary[]> {
+  return handleResponse<PlaylistSummary[]>(await fetch(`${API_BASE}/playlists?t=${Date.now()}`, { cache: "no-store" }));
+}
+
+export async function createPlaylist(data: { name: string; description?: string | null }): Promise<PlaylistSummary> {
+  return handleResponse<PlaylistSummary>(
+    await fetch(`${API_BASE}/playlists`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    })
+  );
+}
+
+export async function updatePlaylist(
+  playlistId: number,
+  data: { name: string; description?: string | null }
+): Promise<PlaylistSummary> {
+  return handleResponse<PlaylistSummary>(
+    await fetch(`${API_BASE}/playlists/${playlistId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    })
+  );
+}
+
+export async function deletePlaylist(playlistId: number): Promise<{ deleted: boolean }> {
+  return handleResponse<{ deleted: boolean }>(
+    await fetch(`${API_BASE}/playlists/${playlistId}`, {
+      method: "DELETE",
+    })
+  );
+}
+
+export async function getPlaylist(playlistId: number): Promise<PlaylistDetail> {
+  return handleResponse<PlaylistDetail>(
+    await fetch(`${API_BASE}/playlists/${playlistId}?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function addPlaylistItems(playlistId: number, videoIds: number[]): Promise<PlaylistAddItemsResult> {
+  return handleResponse<PlaylistAddItemsResult>(
+    await fetch(`${API_BASE}/playlists/${playlistId}/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_ids: videoIds }),
+    })
+  );
+}
+
+export async function removePlaylistItem(playlistId: number, videoId: number): Promise<{ deleted: boolean }> {
+  return handleResponse<{ deleted: boolean }>(
+    await fetch(`${API_BASE}/playlists/${playlistId}/items/${videoId}`, {
+      method: "DELETE",
+    })
+  );
+}
+
+export async function reorderPlaylistByVideoIds(playlistId: number, videoIds: number[]): Promise<PlaylistDetail> {
+  return handleResponse<PlaylistDetail>(
+    await fetch(`${API_BASE}/playlists/${playlistId}/items/reorder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_ids: videoIds }),
+    })
+  );
+}
+
+export async function bulkRemovePlaylistItems(playlistId: number, videoIds: number[]): Promise<PlaylistBulkRemoveResult> {
+  return handleResponse<PlaylistBulkRemoveResult>(
+    await fetch(`${API_BASE}/playlists/${playlistId}/items/remove-bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_ids: videoIds }),
     })
   );
 }

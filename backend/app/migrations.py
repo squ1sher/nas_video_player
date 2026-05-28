@@ -679,5 +679,77 @@ def run_migrations(engine: Engine) -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_video_tags_video_id ON video_tags (video_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_video_tags_tag_id ON video_tags (tag_id)"))
 
+    # ── playlists table ──────────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS playlists (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    description TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    playlist_migrations = [
+        ("description", "TEXT NULL"),
+        ("created_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+        ("updated_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+    ]
+    for col, col_def in playlist_migrations:
+        _add_column_if_missing(engine, "playlists", col, col_def)
+
+    _create_index_if_missing(engine, "ix_playlists_name", "playlists", "name")
+
+    # ── playlist_items table ─────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS playlist_items (
+                    id INTEGER PRIMARY KEY,
+                    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                    video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL,
+                    added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    playlist_item_migrations = [
+        ("position", "INTEGER NOT NULL DEFAULT 1"),
+        ("added_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+    ]
+    for col, col_def in playlist_item_migrations:
+        _add_column_if_missing(engine, "playlist_items", col, col_def)
+
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_playlist_items_playlist_id ON playlist_items (playlist_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_playlist_items_video_id ON playlist_items (video_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_playlist_items_position ON playlist_items (position)"))
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_playlist_items_playlist_video
+                ON playlist_items (playlist_id, video_id)
+                """
+            )
+        )
+        # Best-effort cleanup for old inconsistent DB snapshots.
+        conn.execute(
+            text(
+                """
+                DELETE FROM playlist_items
+                WHERE playlist_id NOT IN (SELECT id FROM playlists)
+                   OR video_id NOT IN (SELECT id FROM videos)
+                """
+            )
+        )
+
     logger.info("Database migrations applied successfully")
 

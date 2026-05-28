@@ -1,20 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { bulkAssignTags, bulkDeleteVideos, fetchVideos } from "../api/client";
+import {
+  bulkAssignTags,
+  bulkDeleteVideos,
+  createPlaylist,
+  fetchVideos,
+  getPlaylists,
+} from "../api/client";
 import type { SortField, SortOrder } from "../api/client";
 import { SearchBar } from "../components/SearchBar";
 import { SortSelect } from "../components/SortSelect";
 import { VideoCard } from "../components/VideoCard";
 import { FolderTree } from "../components/folders/FolderTree";
+import { AddToPlaylistDialog } from "../components/playlists/AddToPlaylistDialog";
 import { TagFilterDialog } from "../components/tags/TagFilterDialog";
 import type { TagFilterState } from "../components/tags/TagFilterDialog";
 import { TagSelectorDialog } from "../components/tags/TagSelectorDialog";
-import type { VideoBulkDeleteResult, VideoListItem } from "../types/video";
+import type { PlaylistSummary, VideoBulkDeleteResult, VideoListItem } from "../types/video";
 import { buildFolderTree } from "../utils/buildFolderTree";
 import { groupVideos } from "../utils/groupVideos";
 
-type Tab = "all" | "folders";
+type Tab = "all" | "folders" | "playlists";
 
 type SourceGroup = {
   key: string;
@@ -74,6 +81,13 @@ export function LibraryPage() {
   const [tagFilterDialogOpen, setTagFilterDialogOpen] = useState(false);
   const [tagFilter, setTagFilter] = useState<TagFilterState>({ selectedTagIds: [], mode: "any", withoutTags: false });
   const [tagPathById, setTagPathById] = useState<Map<number, string>>(new Map());
+  const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
+  const [playlistLoading, setPlaylistLoading] = useState(false);
+  const [playlistActionBusy, setPlaylistActionBusy] = useState(false);
+  const [playlistDialogOpen, setPlaylistDialogOpen] = useState(false);
+  const [playlistEditorOpen, setPlaylistEditorOpen] = useState(false);
+  const [playlistEditorName, setPlaylistEditorName] = useState("");
+  const [playlistEditorDescription, setPlaylistEditorDescription] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
   const [bulkDeleteResult, setBulkDeleteResult] = useState<VideoBulkDeleteResult | null>(null);
@@ -187,6 +201,11 @@ export function LibraryPage() {
     setFolderVideos(data);
   };
 
+  const loadPlaylists = async () => {
+    const data = await getPlaylists();
+    setPlaylists(data);
+  };
+
   useEffect(() => {
     let isMounted = true;
 
@@ -196,9 +215,12 @@ export function LibraryPage() {
         if (tab === "all") {
           setLoading(true);
           await loadAllVideos();
-        } else {
+        } else if (tab === "folders") {
           setFolderLoading(true);
           await loadFolderVideos();
+        } else {
+          setPlaylistLoading(true);
+          await loadPlaylists();
         }
       } catch (err) {
         if (!isMounted) return;
@@ -207,6 +229,7 @@ export function LibraryPage() {
         if (!isMounted) return;
         setLoading(false);
         setFolderLoading(false);
+        setPlaylistLoading(false);
       }
     };
 
@@ -239,6 +262,10 @@ export function LibraryPage() {
     });
   }, [selectionMode, visibleVideos]);
 
+  useEffect(() => {
+    if (tab !== "playlists" || true) return; // playlist detail now uses separate page
+  }, [tab]);
+
   const handleSortChange = (nextSort: SortField, nextOrder: SortOrder) => {
     setSort(nextSort);
     setOrder(nextOrder);
@@ -269,6 +296,13 @@ export function LibraryPage() {
   useEffect(() => {
     setVisibleCount(LIBRARY_INITIAL_ITEMS);
   }, [tab, search, sort, order, tagFilter]);
+
+  useEffect(() => {
+    if (tab === "playlists" && selectionMode) {
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+    }
+  }, [tab, selectionMode]);
 
   const clearSelectionAndExit = () => {
     setSelectedIds(new Set());
@@ -380,6 +414,37 @@ export function LibraryPage() {
     );
   };
 
+  const handleAddSelectedToPlaylist = async (message: string) => {
+    await loadPlaylists();
+    clearSelectionAndExit();
+    setActionNotice(message);
+  };
+
+  const openCreatePlaylist = () => {
+    setPlaylistEditorOpen(true);
+    setPlaylistEditorName("");
+    setPlaylistEditorDescription("");
+    setMenuOpen(false);
+  };
+
+  const submitPlaylistEditor = async () => {
+    if (!playlistEditorName.trim()) return;
+    setPlaylistActionBusy(true);
+    try {
+      await createPlaylist({
+        name: playlistEditorName.trim(),
+        description: playlistEditorDescription.trim() || null,
+      });
+      await loadPlaylists();
+      setPlaylistEditorOpen(false);
+      setActionNotice("Playlist created.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save playlist.");
+    } finally {
+      setPlaylistActionBusy(false);
+    }
+  };
+
   const selectionLabel = `Selected: ${selectedVideos.length}`;
 
   return (
@@ -389,10 +454,11 @@ export function LibraryPage() {
         <nav className="lib-tabs lib-tabs-compact">
           <button className={tab === "all" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("all")}>All Videos</button>
           <button className={tab === "folders" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("folders")}>Folders</button>
+          <button className={tab === "playlists" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("playlists")}>Playlists</button>
         </nav>
         <div className="library-controls-compact">
-          <SearchBar value={search} onChange={setSearch} />
-          <SortSelect sort={sort} order={order} onChange={handleSortChange} />
+          {tab !== "playlists" ? <SearchBar value={search} onChange={setSearch} /> : null}
+          {tab !== "playlists" ? <SortSelect sort={sort} order={order} onChange={handleSortChange} /> : null}
           {selectionMode ? <span className="library-selected-count">{selectionLabel}</span> : null}
 
           <div className="library-menu" ref={menuRef}>
@@ -400,24 +466,29 @@ export function LibraryPage() {
             {menuOpen ? (
               <div className="library-menu-dropdown">
                 <button className="library-menu-item" onClick={() => navigate("/settings")}>Settings</button>
-                {hasActiveTagFilter ? (
-                  <>
+                {tab === "playlists" ? (
+                  <button className="library-menu-item" onClick={openCreatePlaylist}>Create playlist</button>
+                ) : null}
+                {tab !== "playlists" ? (
+                  hasActiveTagFilter ? (
+                    <>
+                      <button className="library-menu-item" onClick={() => { setTagFilterDialogOpen(true); setMenuOpen(false); }}>
+                        Edit tag filter
+                      </button>
+                      <button className="library-menu-item" onClick={() => { clearTagFilter(); setMenuOpen(false); }}>
+                        Clear tag filter
+                      </button>
+                    </>
+                  ) : (
                     <button className="library-menu-item" onClick={() => { setTagFilterDialogOpen(true); setMenuOpen(false); }}>
-                      Edit tag filter
+                      Filter by tags
                     </button>
-                    <button className="library-menu-item" onClick={() => { clearTagFilter(); setMenuOpen(false); }}>
-                      Clear tag filter
-                    </button>
-                  </>
-                ) : (
-                  <button className="library-menu-item" onClick={() => { setTagFilterDialogOpen(true); setMenuOpen(false); }}>
-                    Filter by tags
-                  </button>
-                )}
+                  )
+                ) : null}
 
-                {!selectionMode ? (
+                {!selectionMode && tab !== "playlists" ? (
                   <button className="library-menu-item" onClick={openSelectionMode}>Select</button>
-                ) : (
+                ) : selectionMode ? (
                   <>
                     <button className="library-menu-item" onClick={() => { clearSelectionAndExit(); setMenuOpen(false); }}>
                       Exit selection
@@ -430,6 +501,13 @@ export function LibraryPage() {
                       Add tag to selected
                     </button>
                     <button
+                      className="library-menu-item"
+                      onClick={() => { setPlaylistDialogOpen(true); setMenuOpen(false); }}
+                      disabled={selectedVideos.length === 0}
+                    >
+                      Add to playlist
+                    </button>
+                    <button
                       className="library-menu-item library-menu-item-danger"
                       onClick={openDeleteDialog}
                       disabled={selectedVideos.length === 0}
@@ -437,14 +515,14 @@ export function LibraryPage() {
                       Delete selected
                     </button>
                   </>
-                )}
+                ) : null}
               </div>
             ) : null}
           </div>
         </div>
       </header>
 
-      {hasActiveTagFilter ? (
+      {hasActiveTagFilter && tab !== "playlists" ? (
         <div className="library-active-filter-row">
           {visibleTagChipItems.map((chip) => (
             <button
@@ -554,6 +632,30 @@ export function LibraryPage() {
         </div>
       )}
 
+      {tab === "playlists" && (
+        <div className="playlists-panel">
+          {playlistLoading ? (
+            <div className="status">Loading playlists...</div>
+          ) : playlists.length === 0 ? (
+            <div className="status">No playlists yet. Create your first playlist from Menu.</div>
+          ) : (
+            <div className="playlist-grid">
+              {playlists.map((playlist) => (
+                <button
+                  key={playlist.id}
+                  className="playlist-card"
+                  onClick={() => navigate(`/playlist/${playlist.id}`)}
+                >
+                  <strong>{playlist.name}</strong>
+                  {playlist.description ? <span>{playlist.description}</span> : <span className="playlist-muted">No description</span>}
+                  <small>{playlist.item_count} item(s)</small>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <TagSelectorDialog
         open={tagDialogOpen}
         title="Add tags to selected videos"
@@ -569,6 +671,47 @@ export function LibraryPage() {
         onClose={() => setTagFilterDialogOpen(false)}
         onApply={applyTagFilter}
       />
+
+      <AddToPlaylistDialog
+        open={playlistDialogOpen}
+        selectedCount={selectedVideos.length}
+        selectedVideoIds={selectedVideos.map((video) => video.id)}
+        playlists={playlists}
+        onClose={() => setPlaylistDialogOpen(false)}
+        onDone={(message) => void handleAddSelectedToPlaylist(message)}
+      />
+
+      {playlistEditorOpen ? (
+        <div className="modal-overlay" onClick={playlistActionBusy ? undefined : () => setPlaylistEditorOpen(false)}>
+          <div className="modal-box" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Create playlist</h3>
+              <button className="modal-close" onClick={() => setPlaylistEditorOpen(false)} disabled={playlistActionBusy}>x</button>
+            </div>
+            <div className="modal-body playlist-new-form">
+              <input
+                placeholder="Playlist name"
+                value={playlistEditorName}
+                onChange={(event) => setPlaylistEditorName(event.target.value)}
+                disabled={playlistActionBusy}
+              />
+              <textarea
+                placeholder="Description (optional)"
+                value={playlistEditorDescription}
+                onChange={(event) => setPlaylistEditorDescription(event.target.value)}
+                disabled={playlistActionBusy}
+                rows={4}
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setPlaylistEditorOpen(false)} disabled={playlistActionBusy}>Cancel</button>
+              <button className="btn-primary" onClick={() => void submitPlaylistEditor()} disabled={playlistActionBusy || !playlistEditorName.trim()}>
+                {playlistActionBusy ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {deleteDialogOpen ? (
         <div className="modal-overlay" onClick={bulkDeleteBusy ? undefined : closeDeleteDialog}>

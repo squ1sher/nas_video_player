@@ -145,6 +145,58 @@ export type TagTreePatchResult = {
   tree: TagTreeNode[];
 };
 
+export type PlaylistSummary = {
+  id: number;
+  name: string;
+  description: string | null;
+  item_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PlaylistVideoItem = {
+  id: number;
+  display_title: string;
+  thumbnail_url: string | null;
+  duration: number | null;
+  availability_status: string | null;
+  tags: VideoTagLite[];
+  // Extended fields for library-like view
+  size: number;
+  filename: string;
+  folder_path: string | null;
+  library_root_id: number | null;
+  library_root_name: string | null;
+  file_modified_at: string | null;
+  created_at: string | null;
+  indexed_at: string | null;
+};
+
+export type PlaylistItem = {
+  id: number;
+  playlist_item_id: number;
+  position: number;
+  video: PlaylistVideoItem;
+};
+
+export type PlaylistDetail = PlaylistSummary & {
+  items: PlaylistItem[];
+};
+
+export type PlaylistAddItemsResult = {
+  playlist_id: number;
+  added: number[];
+  skipped_existing: number[];
+  invalid: number[];
+  item_count: number;
+};
+
+export type PlaylistBulkRemoveResult = {
+  removed: number[];
+  not_found: number[];
+  item_count: number;
+};
+
 export type WatchProgress = {
   video_id: number;
   position_seconds: number;

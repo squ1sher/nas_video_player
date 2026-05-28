@@ -127,6 +127,41 @@ class VideoTag(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class Playlist(Base):
+    __tablename__ = "playlists"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PlaylistItem(Base):
+    __tablename__ = "playlist_items"
+    __table_args__ = (
+        UniqueConstraint("playlist_id", "video_id", name="uq_playlist_items_playlist_video"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    playlist_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("playlists.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    video_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("videos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class DuplicateCandidateGroup(Base):
     __tablename__ = "duplicate_candidate_groups"
 

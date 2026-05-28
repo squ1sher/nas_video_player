@@ -2401,3 +2401,158 @@ button.video-card {
   color: #94a3b8;
   font-size: 0.75rem;
 }
+
+.playlists-panel {
+  margin-top: 14px;
+}
+
+.playlist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.playlist-card {
+  border: 1px solid #2d2d2d;
+  background: #181818;
+  border-radius: 10px;
+  color: #e2e8f0;
+  text-align: left;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.playlist-card:hover {
+  border-color: #4d5f73;
+  background: #1e1e1e;
+}
+
+.playlist-muted {
+  color: #9aa6b2;
+  font-size: 13px;
+}
+
+.playlist-detail {
+  border: 1px solid #2d2d2d;
+  border-radius: 12px;
+  background: #181818;
+  padding: 14px;
+}
+
+.playlist-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.playlist-detail-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.playlist-item-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.playlist-item-row {
+  display: grid;
+  grid-template-columns: 36px 160px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  background: #141414;
+  padding: 8px;
+}
+
+.playlist-item-order {
+  color: #9bb0c5;
+  font-size: 14px;
+  text-align: center;
+}
+
+.playlist-item-thumb {
+  display: block;
+  width: 160px;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #222;
+}
+
+.playlist-item-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.playlist-item-main {
+  min-width: 0;
+}
+
+.playlist-item-title {
+  color: #d5e7f9;
+  font-weight: 600;
+}
+
+.playlist-item-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.playlist-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.playlist-new-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.playlist-new-form input,
+.playlist-new-form textarea,
+.modal-body select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #404852;
+  background: #10151b;
+  color: #f0f0f0;
+}
+
+.watch-playlist-strip {
+  border: 1px solid #2d4660;
+  border-radius: 10px;
+  background: #132537;
+  color: #d5e7f9;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.watch-playlist-meta {
+  color: #9fc3e3;
+}
+
+.watch-playlist-actions {
+  display: flex;
+  gap: 8px;
+}
+

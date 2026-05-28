@@ -6,6 +6,7 @@ type Props = {
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (videoId: number) => void;
+  playlistId?: number;
 };
 
 
@@ -15,6 +16,7 @@ export function VideoCard({
   selectionMode = false,
   selected = false,
   onToggleSelect,
+  playlistId,
 }: Props) {
   void progress;
 
@@ -25,6 +27,10 @@ export function VideoCard({
   const handleToggle = () => {
     onToggleSelect?.(video.id);
   };
+
+  const watchHref = playlistId
+    ? `/watch/${video.id}?playlist_id=${playlistId}`
+    : `/watch/${video.id}`;
 
   const content = (
     <>
@@ -70,7 +76,7 @@ export function VideoCard({
   return (
     <a
       className={cardClassName}
-      href={`/watch/${video.id}`}
+      href={watchHref}
       target="_blank"
       rel="noopener noreferrer"
       title={video.title}

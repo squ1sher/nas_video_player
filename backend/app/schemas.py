@@ -171,6 +171,86 @@ class VideoBulkDeleteOut(BaseModel):
     failed: list[VideoBulkDeleteFailedItem]
 
 
+class PlaylistCreateIn(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class PlaylistUpdateIn(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class PlaylistOut(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    item_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlaylistVideoOut(BaseModel):
+    id: int
+    display_title: str
+    thumbnail_url: str | None = None
+    duration: float | None = None
+    availability_status: str | None = None
+    tags: list["VideoTagLiteOut"] = Field(default_factory=list)
+    # Extended fields for library-like playlist view
+    size: int = 0
+    filename: str = ""
+    folder_path: str | None = None
+    library_root_id: int | None = None
+    library_root_name: str | None = None
+    file_modified_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    indexed_at: Optional[datetime] = None
+
+
+class PlaylistItemOut(BaseModel):
+    id: int
+    playlist_item_id: int
+    position: int
+    video: PlaylistVideoOut
+
+
+class PlaylistDetailOut(PlaylistOut):
+    items: list[PlaylistItemOut] = Field(default_factory=list)
+
+
+class PlaylistAddItemsIn(BaseModel):
+    video_ids: list[int] = Field(default_factory=list)
+
+
+class PlaylistAddItemsOut(BaseModel):
+    playlist_id: int
+    added: list[int] = Field(default_factory=list)
+    skipped_existing: list[int] = Field(default_factory=list)
+    invalid: list[int] = Field(default_factory=list)
+    item_count: int
+
+
+class PlaylistReorderItemIn(BaseModel):
+    video_id: int
+    position: int
+
+
+class PlaylistReorderIn(BaseModel):
+    items: list[PlaylistReorderItemIn] = Field(default_factory=list)
+    video_ids: list[int] | None = None
+
+
+class PlaylistBulkRemoveIn(BaseModel):
+    video_ids: list[int] = Field(default_factory=list)
+
+
+class PlaylistBulkRemoveOut(BaseModel):
+    removed: list[int] = Field(default_factory=list)
+    not_found: list[int] = Field(default_factory=list)
+    item_count: int
+
+
 class TagCreateIn(BaseModel):
     name: str
     parent_id: int | None = None

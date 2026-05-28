@@ -18,6 +18,7 @@ from app.routes.hls import global_hls_router, video_hls_router
 from app.routes.library import router as library_router
 from app.routes.maintenance import router as maintenance_router
 from app.routes.media_profiles import router as media_profiles_router
+from app.routes.playlists import router as playlists_router
 from app.routes.progress import router as progress_router
 from app.routes.scan import router as scan_router
 from app.routes.settings import router as settings_router
@@ -49,6 +50,7 @@ app.include_router(duplicates_router)
 app.include_router(global_hls_router)
 app.include_router(video_hls_router)
 app.include_router(tags_router)
+app.include_router(playlists_router)
 app.include_router(videos_router)
 
 

@@ -227,6 +227,7 @@ New `availability_status` field on `Video`:
 - **Library** is now browsing-focused:
   - All Videos
   - Folders
+  - Playlists
   - compact search/sort controls
 - **Settings** is operations-focused:
   - Media Sources
@@ -270,7 +271,23 @@ New `availability_status` field on `Video`:
 - Active filters are shown as compact chips below the header only when enabled.
 - Chips can be removed individually and `Clear` removes all tag filters.
 - Tag filtering composes with search, sort/order, grouping, folders view, and manual **Load more**.
-- Tag sorting, saved collections, and playlists are future work.
+
+### Playlists (manual ordered lists)
+
+- Playlists are curated, ordered lists of videos (different from dynamic tag filters).
+- Open **Library -> Playlists** to browse existing playlists.
+- In Library selection mode, use **Menu -> Add to playlist**:
+  - select an existing playlist, or
+  - create a new playlist and add selected videos in one flow.
+- Duplicate videos in the same playlist are skipped (one video per playlist for now).
+- Playlist detail is a library-like gallery scoped to playlist videos:
+  - search, tag filter (`Any` / `All` / `Without tags`), grouping, and **Load more**
+  - sort by `Playlist order`, `Date`, `Duration`, or `File size`
+  - open a playlist video with context (`/watch/{id}?playlist_id=...`) for Previous/Next playback
+  - selection mode actions: add tags, remove from playlist (video files remain), delete selected video files
+  - separate reorder mode with explicit save/cancel
+  - edit playlist name/description and delete playlist (videos remain)
+- Watch page with playlist context shows playlist name, current position, and Previous/Next buttons.
 
 
 ### Deployment folders
@@ -503,6 +520,7 @@ You do not need to edit `docker-compose.yml` for every new media subfolder; add 
 11. Click any video card or folder video item -> opens watch page in a **new tab**
 12. Video resumes from last position automatically
 13. Close the tab - progress is saved
+14. Optional: use **Playlists** tab for curated viewing queues
 
 ## API endpoints
 
@@ -589,6 +607,19 @@ You do not need to edit `docker-compose.yml` for every new media subfolder; add 
 | `GET` | `/api/duplicates/status` | Current duplicate scan status |
 | `GET` | `/api/duplicates/groups` | Latest duplicate candidate groups |
 | `GET` | `/api/duplicates/summary` | Latest duplicate summary |
+
+### Playlists
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/playlists` | List playlists with `item_count` |
+| `POST` | `/api/playlists` | Create playlist |
+| `PUT` | `/api/playlists/{playlist_id}` | Update playlist name/description |
+| `DELETE` | `/api/playlists/{playlist_id}` | Delete playlist only (videos remain) |
+| `GET` | `/api/playlists/{playlist_id}` | Playlist detail with ordered items |
+| `POST` | `/api/playlists/{playlist_id}/items` | Append video ids to playlist (skip duplicates) |
+| `DELETE` | `/api/playlists/{playlist_id}/items/{video_id}` | Remove one video from playlist |
+| `POST` | `/api/playlists/{playlist_id}/items/reorder` | Persist new order (`video_ids` list) |
+| `POST` | `/api/playlists/{playlist_id}/items/remove-bulk` | Remove multiple videos from playlist only |
 
 ### Misc
 | Method | Path | Description |
@@ -786,7 +817,6 @@ sudo docker compose up -d --build
 ### Phase 4: Advanced media
 - Subtitles (`.srt`, `.vtt`, embedded)
 - Audio track selection
-- Playlists
 
 ### Phase 5: Production hardening
 - Scheduled automatic scan
