@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   deleteVideo,
@@ -40,6 +40,22 @@ function formatSize(bytes: number): string {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
+type PlaylistNeighbor = {
+  videoId: number;
+  position: number;
+  displayTitle: string;
+  thumbnailUrl: string | null;
+  availabilityStatus: string | null;
+};
+
+type UpNextState =
+  | { kind: "countdown"; target: PlaylistNeighbor; remaining: number }
+  | { kind: "end" }
+  | null;
+
+const PLAYLIST_AUTOPLAY_NEXT_KEY = "playlist_autoplay_next";
+const PLAYLIST_AUTOPLAY_SECONDS = 5;
+
 export function WatchPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -62,6 +78,14 @@ export function WatchPage() {
   const [selectedQuality, setSelectedQuality] = useState("auto");
   const [playerQualities, setPlayerQualities] = useState<string[]>([]);
   const [playlist, setPlaylist] = useState<PlaylistDetail | null>(null);
+  const [autoplayNext, setAutoplayNext] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(PLAYLIST_AUTOPLAY_NEXT_KEY) === "true";
+  });
+  const [upNextState, setUpNextState] = useState<UpNextState>(null);
+  const upNextTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const upNextTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const upNextTargetRef = useRef<PlaylistNeighbor | null>(null);
 
   const loadPlaybackData = useCallback(async (videoId: number) => {
     const [source, status] = await Promise.all([getPlaybackSource(videoId), getVideoHlsStatus(videoId)]);
@@ -82,7 +106,7 @@ export function WatchPage() {
         const [vid, prog] = await Promise.all([fetchVideo(id), getProgress(numericId)]);
         setVideo(vid);
         setProgress(prog);
-        if (playlistId && Number.isFinite(playlistId)) {
+        if (playlistId !== null && Number.isFinite(playlistId)) {
           const playlistDetail = await getPlaylist(playlistId);
           setPlaylist(playlistDetail);
         } else {
@@ -103,6 +127,14 @@ export function WatchPage() {
   }, [id, loadPlaybackData, playlistId]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(PLAYLIST_AUTOPLAY_NEXT_KEY, String(autoplayNext));
+    } catch {
+      // ignore storage failures
+    }
+  }, [autoplayNext]);
+
+  useEffect(() => {
     if (!video) return;
     if (hlsStatus?.status !== "running" && hlsStatus?.status !== "pending") return;
 
@@ -118,11 +150,35 @@ export function WatchPage() {
     return () => clearInterval(timer);
   }, [video, hlsStatus?.status]);
 
+  const clearUpNextState = useCallback(() => {
+    if (upNextTickRef.current) {
+      clearInterval(upNextTickRef.current);
+      upNextTickRef.current = null;
+    }
+    if (upNextTimeoutRef.current) {
+      clearTimeout(upNextTimeoutRef.current);
+      upNextTimeoutRef.current = null;
+    }
+    upNextTargetRef.current = null;
+    setUpNextState(null);
+  }, []);
+
+  useEffect(() => {
+    clearUpNextState();
+  }, [id, playlistId, clearUpNextState]);
+
+  useEffect(() => {
+    if (!autoplayNext) {
+      clearUpNextState();
+    }
+  }, [autoplayNext, clearUpNextState]);
+
+  useEffect(() => clearUpNextState, [clearUpNextState]);
+
   const qualityOptions = useMemo(() => {
     if (!playbackSource) return [];
     if (playbackSource.source_type === "hls") {
-      const fromPlayer = playerQualities.length > 0 ? playerQualities : playbackSource.available_qualities;
-      return fromPlayer;
+      return playerQualities.length > 0 ? playerQualities : playbackSource.available_qualities;
     }
     return ["original"];
   }, [playbackSource, playerQualities]);
@@ -136,11 +192,109 @@ export function WatchPage() {
     setSelectedQuality("original");
   }, [playbackSource]);
 
-  const playlistPosition = useMemo(() => {
-    if (!playlist || !video) return { index: -1, total: 0 };
-    const index = playlist.items.findIndex((item) => item.id === video.id);
-    return { index, total: playlist.items.length };
+  const playlistContext = useMemo(() => {
+    if (!playlist || !video) return null;
+
+    const makeNeighbor = (item: PlaylistDetail["items"][number], position: number): PlaylistNeighbor => ({
+      videoId: item.id,
+      position,
+      displayTitle: item.video.display_title,
+      thumbnailUrl: item.video.thumbnail_url,
+      availabilityStatus: item.video.availability_status,
+    });
+
+    const currentIndex = playlist.items.findIndex((item) => item.id === video.id);
+    const findNeighbor = (startIndex: number, step: -1 | 1): PlaylistNeighbor | null => {
+      let index = startIndex + step;
+      while (index >= 0 && index < playlist.items.length) {
+        const item = playlist.items[index];
+        if (item.video.availability_status !== "missing") {
+          return makeNeighbor(item, index + 1);
+        }
+        index += step;
+      }
+      return null;
+    };
+
+    const currentItem = currentIndex >= 0 ? playlist.items[currentIndex] : null;
+    const current = currentItem ? makeNeighbor(currentItem, currentIndex + 1) : null;
+    const previous = currentIndex >= 0 ? findNeighbor(currentIndex, -1) : null;
+    const next = currentIndex >= 0 ? findNeighbor(currentIndex, 1) : null;
+
+    return {
+      playlistId: playlist.id,
+      playlistName: playlist.name,
+      total: playlist.items.length,
+      currentIndex,
+      currentPosition: current ? current.position : 0,
+      current,
+      previous,
+      next,
+    };
   }, [playlist, video]);
+
+  const startUpNextCountdown = useCallback(
+    (nextItem: PlaylistNeighbor) => {
+      if (!playlistContext) return;
+      clearUpNextState();
+      upNextTargetRef.current = nextItem;
+      setUpNextState({ kind: "countdown", target: nextItem, remaining: PLAYLIST_AUTOPLAY_SECONDS });
+
+      upNextTickRef.current = setInterval(() => {
+        setUpNextState((prev) => {
+          if (!prev || prev.kind !== "countdown") return prev;
+          if (prev.remaining <= 1) return prev;
+          return { ...prev, remaining: prev.remaining - 1 };
+        });
+      }, 1000);
+
+      upNextTimeoutRef.current = setTimeout(() => {
+        const target = upNextTargetRef.current;
+        clearUpNextState();
+        if (target) {
+          navigate(`/watch/${target.videoId}?playlist_id=${playlistContext.playlistId}`);
+        }
+      }, PLAYLIST_AUTOPLAY_SECONDS * 1000);
+    },
+    [clearUpNextState, navigate, playlistContext]
+  );
+
+  const handleVideoEnded = useCallback(() => {
+    if (!playlistContext || playlistContext.currentIndex < 0) return;
+
+    if (!autoplayNext) {
+      if (!playlistContext.next) {
+        setUpNextState({ kind: "end" });
+      }
+      return;
+    }
+
+    if (!playlistContext.next) {
+      setUpNextState({ kind: "end" });
+      return;
+    }
+
+    startUpNextCountdown(playlistContext.next);
+  }, [autoplayNext, playlistContext, startUpNextCountdown]);
+
+  const goPlaylistVideo = useCallback(
+    (nextVideoId: number) => {
+      if (!playlistContext) return;
+      navigate(`/watch/${nextVideoId}?playlist_id=${playlistContext.playlistId}`);
+    },
+    [navigate, playlistContext]
+  );
+
+  const handlePlayUpNextNow = () => {
+    if (upNextState?.kind !== "countdown") return;
+    const target = upNextState.target;
+    clearUpNextState();
+    goPlaylistVideo(target.videoId);
+  };
+
+  const handleCancelUpNext = () => {
+    clearUpNextState();
+  };
 
   if (loading) return <div className="page status">Loading video…</div>;
   if (error || !video) return <div className="page error">{error ?? "Video not found"}</div>;
@@ -241,16 +395,6 @@ export function WatchPage() {
   };
 
 
-  const goPlaylistRelative = (direction: -1 | 1) => {
-    if (!playlist || !video) return;
-    const idx = playlist.items.findIndex((item) => item.id === video.id);
-    if (idx < 0) return;
-    const nextIdx = idx + direction;
-    if (nextIdx < 0 || nextIdx >= playlist.items.length) return;
-    const nextVideoId = playlist.items[nextIdx].id;
-    navigate(`/watch/${nextVideoId}?playlist_id=${playlist.id}`);
-  };
-
   return (
     <div className="page watch-page">
       <div className="watch-header">
@@ -280,24 +424,70 @@ export function WatchPage() {
       </div>
 
       {actionMessage && <div className="notice">{actionMessage}</div>}
-      {playlist && playlistPosition.index >= 0 ? (
-        <div className="watch-playlist-strip">
-          <div>
-            <strong>{playlist.name}</strong>
-            <span className="watch-playlist-meta"> {playlistPosition.index + 1} / {playlistPosition.total}</span>
+      {playlistContext ? (
+        <section className="watch-playlist-strip watch-playlist-panel">
+          <div className="watch-playlist-panel-main">
+            <div>
+              <strong>{playlistContext.playlistName}</strong>
+              <span className="watch-playlist-meta"> {playlistContext.current ? `${playlistContext.currentPosition} / ${playlistContext.total}` : `${playlistContext.total} item(s)`}</span>
+            </div>
+            <div className="watch-playlist-actions">
+              <button className="btn-secondary" onClick={() => goPlaylistVideo(playlistContext.previous?.videoId ?? 0)} disabled={!playlistContext.previous}>
+                Previous
+              </button>
+              <button className="btn-secondary" onClick={() => goPlaylistVideo(playlistContext.next?.videoId ?? 0)} disabled={!playlistContext.next}>
+                Next
+              </button>
+              {playlistContext.next ? (
+                <label className="watch-playlist-autoplay-toggle">
+                  <input type="checkbox" checked={autoplayNext} onChange={(event) => setAutoplayNext(event.target.checked)} />
+                  <span>Autoplay next</span>
+                </label>
+              ) : null}
+            </div>
           </div>
-          <div className="watch-playlist-actions">
-            <button className="btn-secondary" onClick={() => goPlaylistRelative(-1)} disabled={playlistPosition.index <= 0}>Previous</button>
-            <button
-              className="btn-secondary"
-              onClick={() => goPlaylistRelative(1)}
-              disabled={playlistPosition.index < 0 || playlistPosition.index >= playlistPosition.total - 1}
-            >
-              Next
-            </button>
+
+          {playlistContext.current ? (
+            <div className="watch-playlist-up-next-preview">
+              {playlistContext.next ? (
+                <>
+                  <div className="watch-playlist-up-next-thumb">
+                    {playlistContext.next.thumbnailUrl ? (
+                      <img src={playlistContext.next.thumbnailUrl} alt={playlistContext.next.displayTitle} loading="lazy" decoding="async" />
+                    ) : (
+                      <div className="thumb placeholder">No Thumbnail</div>
+                    )}
+                  </div>
+                  <div className="watch-playlist-up-next-copy">
+                    <span className="watch-playlist-up-next-label">Up next</span>
+                    <strong>{playlistContext.next.displayTitle}</strong>
+                  </div>
+                </>
+              ) : (
+                <span className="watch-playlist-end">End of playlist</span>
+              )}
+            </div>
+          ) : (
+            <div className="watch-playlist-warning">This video is no longer in the playlist.</div>
+          )}
+        </section>
+      ) : null}
+
+      {upNextState?.kind === "countdown" ? (
+        <div className="watch-up-next-overlay">
+          <div className="watch-up-next-card">
+            <div className="watch-up-next-heading">Up next</div>
+            <strong className="watch-up-next-title">{upNextState.target.displayTitle}</strong>
+            <div className="watch-up-next-countdown">Playing in {upNextState.remaining} second{upNextState.remaining === 1 ? "" : "s"}</div>
+            <div className="watch-up-next-actions">
+              <button className="btn-primary" onClick={handlePlayUpNextNow}>Play now</button>
+              <button className="btn-secondary" onClick={handleCancelUpNext}>Cancel</button>
+            </div>
           </div>
         </div>
       ) : null}
+
+      {upNextState?.kind === "end" ? <div className="notice watch-playlist-end-notice">End of playlist</div> : null}
       <VideoTagsPanel videoId={video.id} onTagsChanged={handleTagsChanged} />
 
       {askResume && progress && (
@@ -315,6 +505,7 @@ export function WatchPage() {
         selectedQuality={selectedQuality}
         onAvailableQualities={setPlayerQualities}
         initialPosition={initialPosition}
+        onEnded={handleVideoEnded}
       />
 
       {video.media_status === "probe_failed_possible_video" && (

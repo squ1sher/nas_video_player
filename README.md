@@ -287,6 +287,8 @@ New `availability_status` field on `Video`:
   - selection mode actions: add tags, remove from playlist (video files remain), delete selected video files
   - separate reorder mode with explicit save/cancel
   - edit playlist name/description and delete playlist (videos remain)
+- Playlist sorting/filtering only changes the browsing view. Playback, Previous/Next, and Autoplay Next always use the saved manual playlist order.
+- Autoplay Next is stored locally in the browser and does not loop at the end of a playlist.
 - Watch page with playlist context shows playlist name, current position, and Previous/Next buttons.
 
 

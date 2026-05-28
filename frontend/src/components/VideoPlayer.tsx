@@ -13,6 +13,7 @@ type Props = {
   onAvailableQualities?: (qualities: string[]) => void;
   initialPosition?: number;
   onError?: () => void;
+  onEnded?: () => void;
 };
 
 export function VideoPlayer({
@@ -23,6 +24,7 @@ export function VideoPlayer({
   onAvailableQualities,
   initialPosition = 0,
   onError,
+  onEnded,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -39,11 +41,11 @@ export function VideoPlayer({
     if (idx >= 0) hls.currentLevel = idx;
   };
 
-  const saveProgress = (el: HTMLVideoElement, keepalive = false) => {
-    if (!el.duration || el.duration === Infinity || el.currentTime === 0) return;
-    void updateProgress(video.id, el.currentTime, el.duration, keepalive).catch(() => {
-      // Silently ignore progress save failures
-    });
+  const saveProgress = (el: HTMLVideoElement, keepalive = false): Promise<void> => {
+    if (!el.duration || el.duration === Infinity || el.currentTime === 0) return Promise.resolve();
+    return updateProgress(video.id, el.currentTime, el.duration, keepalive)
+      .then(() => undefined)
+      .catch(() => undefined);
   };
 
   const startSaveInterval = (el: HTMLVideoElement) => {
@@ -137,9 +139,11 @@ export function VideoPlayer({
       stopSaveInterval();
       saveProgress(el);
     };
-    const onEnded = () => {
+    const onVideoEnded = () => {
       stopSaveInterval();
-      saveProgress(el);
+      void saveProgress(el).finally(() => {
+        onEnded?.();
+      });
     };
 
     const onBeforeUnload = () => {
@@ -149,18 +153,18 @@ export function VideoPlayer({
     el.addEventListener("loadedmetadata", onLoadedMetadata);
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
-    el.addEventListener("ended", onEnded);
+    el.addEventListener("ended", onVideoEnded);
     window.addEventListener("beforeunload", onBeforeUnload);
 
     return () => {
       el.removeEventListener("loadedmetadata", onLoadedMetadata);
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
-      el.removeEventListener("ended", onEnded);
+      el.removeEventListener("ended", onVideoEnded);
       window.removeEventListener("beforeunload", onBeforeUnload);
       stopSaveInterval();
     };
-  }, [video.id, initialPosition]);
+  }, [video.id, initialPosition, onEnded]);
 
   if (playerError) {
     return (

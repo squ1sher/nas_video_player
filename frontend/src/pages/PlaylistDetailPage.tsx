@@ -54,6 +54,16 @@ function formatSize(bytes: number): string {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
+function parseSortableDate(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function getPlaylistBrowseDate(video: VideoListItem): number | null {
+  return parseSortableDate(video.file_modified_at) ?? parseSortableDate(video.indexed_at) ?? parseSortableDate(video.created_at);
+}
+
 /** Map a PlaylistItem to the VideoListItem shape consumed by VideoCard / groupVideos. */
 function toVideoListItem(item: PlaylistItem): VideoListItem {
   const v = item.video as PlaylistItem["video"] & {
@@ -247,17 +257,51 @@ export function PlaylistDetailPage() {
     return items;
   }, [allItems, search, tagFilter]);
 
+  const sortedItems = useMemo(() => {
+    if (sort === "playlist_order") {
+      return filteredItems;
+    }
+
+    const indexed = filteredItems.map((video, index) => ({ video, index }));
+    indexed.sort((a, b) => {
+      const direction = order === "asc" ? 1 : -1;
+
+      if (sort === "title") {
+        const byTitle = a.video.title.localeCompare(b.video.title, "ru-RU", { sensitivity: "base" });
+        if (byTitle !== 0) return byTitle * direction;
+      } else if (sort === "duration") {
+        const byDuration = (a.video.duration ?? -1) - (b.video.duration ?? -1);
+        if (byDuration !== 0) return byDuration * direction;
+      } else if (sort === "size") {
+        const bySize = a.video.size - b.video.size;
+        if (bySize !== 0) return bySize * direction;
+      } else {
+        const aDate = getPlaylistBrowseDate(a.video);
+        const bDate = getPlaylistBrowseDate(b.video);
+        if (aDate === null && bDate !== null) return 1;
+        if (aDate !== null && bDate === null) return -1;
+        if (aDate !== null && bDate !== null && aDate !== bDate) {
+          return (aDate - bDate) * direction;
+        }
+      }
+
+      return a.index - b.index;
+    });
+
+    return indexed.map((entry) => entry.video);
+  }, [filteredItems, order, sort]);
+
   // ─── Grouping / sorting ───────────────────────────────────────────────────
 
   type VisibleGroup = { key: string; title: string; videos: VideoListItem[]; totalCount: number };
 
   const groupedItems = useMemo<VisibleGroup[]>(() => {
     if (sort === "playlist_order") {
-      return [{ key: "playlist_order", title: "Playlist order", videos: filteredItems, totalCount: filteredItems.length }];
+      return [{ key: "playlist_order", title: "Playlist order", videos: sortedItems, totalCount: sortedItems.length }];
     }
-    const groups = groupVideos(filteredItems, { sort: sort as SortField, order });
+    const groups = groupVideos(sortedItems, { sort: sort as SortField, order });
     return groups.map((g) => ({ key: g.key, title: g.title, videos: g.videos, totalCount: g.videos.length }));
-  }, [filteredItems, sort, order]);
+  }, [sortedItems, sort, order]);
 
   const visibleGroups = useMemo<VisibleGroup[]>(() => {
     let remaining = visibleCount;
@@ -274,7 +318,7 @@ export function PlaylistDetailPage() {
   }, [groupedItems, visibleCount]);
 
   const totalVisible = useMemo(() => visibleGroups.reduce((s, g) => s + g.videos.length, 0), [visibleGroups]);
-  const canLoadMore = totalVisible < filteredItems.length;
+  const canLoadMore = totalVisible < sortedItems.length;
 
   const visibleVideos = useMemo(() => visibleGroups.flatMap((g) => g.videos), [visibleGroups]);
 
@@ -617,6 +661,10 @@ export function PlaylistDetailPage() {
           </div>
         )}
       </header>
+
+      <div className="playlist-browse-note">
+        Playback uses playlist order. Sorting/filtering here only changes the browsing view.
+      </div>
 
       {/* ── Active tag filter chips ─────────────────────────────────────── */}
       {hasActiveTagFilter && !reorderMode ? (
