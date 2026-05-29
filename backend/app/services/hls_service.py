@@ -24,6 +24,7 @@ from app.services.hls_reconciliation_service import (
 )
 
 ALLOWED_QUALITIES = ("480p", "720p", "1080p")
+DEFAULT_GENERATION_QUALITIES = ("480p", "720p")
 QUALITY_PROFILES: dict[str, dict[str, int]] = {
     "480p": {"height": 480, "video_bitrate": 1_200_000, "audio_bitrate": 96_000},
     "720p": {"height": 720, "video_bitrate": 2_500_000, "audio_bitrate": 128_000},
@@ -63,7 +64,7 @@ def _master_stream_url(video_id: int) -> str:
 
 
 def _normalize_qualities(requested: list[str] | None, source_height: int | None) -> list[str]:
-    raw = requested if requested else list(ALLOWED_QUALITIES)
+    raw = requested if requested else list(DEFAULT_GENERATION_QUALITIES)
     deduped = [q for q in ALLOWED_QUALITIES if q in raw]
     if source_height and source_height > 0:
         deduped = [q for q in deduped if QUALITY_PROFILES[q]["height"] <= source_height]
@@ -320,7 +321,7 @@ def _csv_qualities(qualities: list[str]) -> str:
 def _parse_qualities_csv(value: str) -> list[str]:
     parsed = [q.strip() for q in value.split(",") if q.strip()]
     normalized = [q for q in ALLOWED_QUALITIES if q in parsed]
-    return normalized if normalized else list(ALLOWED_QUALITIES)
+    return normalized if normalized else list(DEFAULT_GENERATION_QUALITIES)
 
 
 def _is_video_queued_or_running(db: Session, video_id: int) -> bool:
@@ -421,7 +422,7 @@ def create_library_batch(
 ) -> dict[str, object]:
     normalized_qualities = _normalize_qualities(qualities, None)
     if not normalized_qualities:
-        normalized_qualities = list(ALLOWED_QUALITIES)
+        normalized_qualities = list(DEFAULT_GENERATION_QUALITIES)
 
     all_videos = db.query(Video).order_by(Video.id.asc()).all()
     total_library_videos = len(all_videos)

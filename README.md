@@ -167,9 +167,11 @@ New `availability_status` field on `Video`:
 - Quality targets:
   - `480p` (~1200k video, 96k audio)
   - `720p` (~2500k video, 128k audio)
-  - `1080p` (~5000k video, 160k audio)
+- `1080p` generation is disabled by default to reduce NAS CPU/disk usage.
 - Upscaling is disabled (qualities above source resolution are skipped).
 - Default DS923+ recommendation: one HLS job at a time.
+- Original playback remains available for maximum quality.
+- Existing legacy `1080p` HLS cache/playlists are kept; they are not auto-deleted.
 
 ### Prepare HLS for the entire library (overnight)
 - You can enqueue an overnight batch to prepare HLS for all indexed videos without completed HLS.
@@ -179,6 +181,17 @@ New `availability_status` field on `Video`:
 - Backend continues processing while browser is closed (as long as container is running).
 - On process restart, previously running HLS jobs are marked interrupted/failed to avoid duplicate ffmpeg execution.
 - Global queue and active batch progress are visible via `/api/hls/status` and batch detail endpoint.
+
+### Scheduler (daily jobs)
+- Settings now includes a **Scheduler** section with two jobs:
+  - `Library scan`
+  - `Prepare HLS for all missing`
+- Both jobs are **disabled by default**.
+- Schedule type is currently `daily` with configurable `HH:MM` time.
+- Scheduler uses container local time.
+- Jobs skip safely when related work is already running.
+- Scheduled HLS prepare-missing uses `480p` + `720p` defaults and skips existing HLS.
+- Synology recommendation: run scheduled HLS at night and keep `MAX_CONCURRENT_HLS_JOBS=1` on DS923+.
 
 ### Open video in new tab
 - All video cards open the watch page in a **new browser tab**
@@ -232,6 +245,7 @@ New `availability_status` field on `Video`:
 - **Settings** is operations-focused:
   - Media Sources
   - HLS / Streaming
+  - Scheduler
   - Duplicates
   - Playback Compatibility
   - Maintenance
@@ -518,11 +532,12 @@ You do not need to edit `docker-compose.yml` for every new media subfolder; add 
 7. Use **Settings** → **Duplicates** to run duplicate scan and review candidates
 8. Use **Settings** → **Playback Compatibility** to review media profiles/manual playback status
 9. Use **Settings** → **HLS / Streaming** for HLS repair and batch preparation
-10. In **Folders**, expand folders inline to browse nested folders and play files without switching tabs
-11. Click any video card or folder video item -> opens watch page in a **new tab**
-12. Video resumes from last position automatically
-13. Close the tab - progress is saved
-14. Optional: use **Playlists** tab for curated viewing queues
+10. Use **Settings** → **Scheduler** to enable daily scan/HLS jobs (disabled by default)
+11. In **Folders**, expand folders inline to browse nested folders and play files without switching tabs
+12. Click any video card or folder video item -> opens watch page in a **new tab**
+13. Video resumes from last position automatically
+14. Close the tab - progress is saved
+15. Optional: use **Playlists** tab for curated viewing queues
 
 ## API endpoints
 
@@ -589,6 +604,13 @@ You do not need to edit `docker-compose.yml` for every new media subfolder; add 
 | `POST` | `/api/settings/media-sources/validate` | Validate a selected media subfolder before saving |
 | `POST` | `/api/settings/media-sources/{id}/scan` | Start a library scan of all enabled sources |
 
+### Scheduler
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/scheduler/jobs` | List scheduled jobs and status metadata |
+| `PUT` | `/api/scheduler/jobs/{job_id}` | Update enabled flag and daily run time |
+| `POST` | `/api/scheduler/jobs/{job_id}/run-now` | Trigger a scheduled job immediately |
+
 ### Library diagnostics
 | Method | Path | Description |
 |--------|------|-------------|
@@ -639,7 +661,7 @@ You do not need to edit `docker-compose.yml` for every new media subfolder; add 
 
 ```json
 {
-  "qualities": ["480p", "720p", "1080p"],
+  "qualities": ["480p", "720p"],
   "skip_existing": true,
   "force": false,
   "only_missing_hls": true

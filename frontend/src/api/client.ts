@@ -31,6 +31,9 @@ import type {
   PlaylistSummary,
   PlaybackSource,
   ScanStartedResponse,
+  ScheduledJob,
+  ScheduledJobRunNowResponse,
+  ScheduledJobUpdate,
   ScanStatus,
   TagItem,
   TagTreeMove,
@@ -131,7 +134,7 @@ export async function prepareVideoHls(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         force: body.force ?? false,
-        qualities: body.qualities ?? ["480p", "720p", "1080p"],
+        qualities: body.qualities ?? ["480p", "720p"],
       }),
     })
   );
@@ -162,7 +165,7 @@ export async function createLibraryHlsBatch(body: {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        qualities: body.qualities ?? ["480p", "720p", "1080p"],
+        qualities: body.qualities ?? ["480p", "720p"],
         skip_existing: body.skip_existing ?? true,
         force: body.force ?? false,
         only_missing_hls: body.only_missing_hls ?? true,
@@ -626,6 +629,31 @@ export async function scanMediaSource(id: number): Promise<ScanStartedResponse> 
   return handleResponse<ScanStartedResponse>(
     await fetch(`${API_BASE}/settings/media-sources/${id}/scan`, {
       method: "POST",
+    })
+  );
+}
+
+export async function getScheduledJobs(): Promise<ScheduledJob[]> {
+  return handleResponse<ScheduledJob[]>(
+    await fetch(`${API_BASE}/scheduler/jobs?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function updateScheduledJob(jobId: number, data: ScheduledJobUpdate): Promise<ScheduledJob> {
+  return handleResponse<ScheduledJob>(
+    await fetch(`${API_BASE}/scheduler/jobs/${jobId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    })
+  );
+}
+
+export async function runScheduledJobNow(jobId: number): Promise<ScheduledJobRunNowResponse> {
+  return handleResponse<ScheduledJobRunNowResponse>(
+    await fetch(`${API_BASE}/scheduler/jobs/${jobId}/run-now`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
     })
   );
 }

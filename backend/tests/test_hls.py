@@ -664,3 +664,56 @@ def test_library_batch_item_status_filter(tmp_path: Path, monkeypatch) -> None:
     assert all(item["status"] == "skipped" for item in skipped.json()["items"])
 
 
+def test_prepare_hls_without_qualities_uses_480p_720p_defaults(tmp_path: Path, monkeypatch) -> None:
+    _install_fake_ffmpeg(monkeypatch)
+    client = make_client(tmp_path)
+    video_id = _create_video_with_file(tmp_path, height=1080, width=1920, stem="default_single")
+
+    response = client.post(f"/api/videos/{video_id}/hls/prepare", json={"force": False})
+    assert response.status_code == 202
+
+    done = _wait_for_completion(client, video_id)
+    assert done["status"] == "completed"
+    assert done["available_qualities"] == ["480p", "720p"]
+    assert "1080p" not in done["available_qualities"]
+
+
+def test_library_batch_without_qualities_uses_480p_720p_defaults(tmp_path: Path, monkeypatch) -> None:
+    _install_fake_ffmpeg(monkeypatch)
+    client = make_client(tmp_path)
+    _create_video_with_file(tmp_path, stem="default_batch")
+
+    response = client.post("/api/hls/batches/library", json={})
+    assert response.status_code == 202
+    batch_id = response.json()["batch_id"]
+    assert batch_id is not None
+
+    from app.database import SessionLocal
+    from app.models import HlsBatch
+
+    db = SessionLocal()
+    batch = db.query(HlsBatch).filter(HlsBatch.id == batch_id).first()
+    assert batch is not None
+    assert batch.qualities_csv == "480p,720p"
+    db.close()
+
+
+def test_prepare_missing_does_not_delete_existing_1080p_hls(tmp_path: Path, monkeypatch) -> None:
+    _install_fake_ffmpeg(monkeypatch)
+    client = make_client(tmp_path)
+    video_id = _create_video_with_file(tmp_path, stem="legacy_1080")
+
+    _write_valid_hls_tree(tmp_path, video_id, quality="1080p")
+    legacy_variant_index = _hls_root(tmp_path, video_id) / "1080p" / "index.m3u8"
+    assert legacy_variant_index.exists()
+
+    response = client.post(
+        "/api/hls/batches/library",
+        json={"skip_existing": True, "force": False, "only_missing_hls": True},
+    )
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["skipped_existing_hls"] >= 1
+    assert legacy_variant_index.exists()
+
+

@@ -21,11 +21,13 @@ from app.routes.media_profiles import router as media_profiles_router
 from app.routes.playlists import router as playlists_router
 from app.routes.progress import router as progress_router
 from app.routes.scan import router as scan_router
+from app.routes.scheduler import router as scheduler_router
 from app.routes.settings import router as settings_router
 from app.routes.tags import router as tags_router
 from app.routes.videos import router as videos_router
 from app.scanner import initialize_library_roots, recover_scan_runtime_state
 from app.services.hls_service import ensure_batch_worker_started, recover_hls_runtime_state
+from app.services.scheduler_service import initialize_default_jobs, recalculate_next_runs, start_scheduler
 from app.utils.logging_config import configure_logging
 
 settings = get_settings()
@@ -38,6 +40,7 @@ app = FastAPI(title="NAS Video Player", version="0.2.6")
 
 app.include_router(health_router)
 app.include_router(scan_router)
+app.include_router(scheduler_router)
 app.include_router(settings_router)
 app.include_router(library_router)
 app.include_router(media_profiles_router)
@@ -62,11 +65,14 @@ def on_startup() -> None:
     db = _db_module.SessionLocal()
     try:
         initialize_library_roots(db, settings)
+        initialize_default_jobs(db)
+        recalculate_next_runs(db)
     finally:
         db.close()
     recover_scan_runtime_state()
     recover_hls_runtime_state()
     ensure_batch_worker_started()
+    start_scheduler(settings)
     logger.info("Application started")
     logger.info("Video library path: %s", settings.video_library_path)
 

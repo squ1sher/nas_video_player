@@ -366,7 +366,7 @@ export function WatchPage() {
     try {
       setHlsBusy(true);
       setActionMessage(null);
-      await prepareVideoHls(video.id, { force: false, qualities: ["480p", "720p", "1080p"] });
+      await prepareVideoHls(video.id, { force: false, qualities: ["480p", "720p"] });
       const status = await getVideoHlsStatus(video.id);
       setHlsStatus(status);
       setActionMessage("Preparing HLS...");

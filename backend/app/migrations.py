@@ -448,7 +448,7 @@ def run_migrations(engine: Engine) -> None:
                     id INTEGER PRIMARY KEY,
                     status VARCHAR(32) NOT NULL DEFAULT 'queued',
                     request_type VARCHAR(32) NOT NULL DEFAULT 'library',
-                    qualities_csv VARCHAR(64) NOT NULL DEFAULT '480p,720p,1080p',
+                    qualities_csv VARCHAR(64) NOT NULL DEFAULT '480p,720p',
                     skip_existing BOOLEAN NOT NULL DEFAULT 1,
                     force BOOLEAN NOT NULL DEFAULT 0,
                     only_missing_hls BOOLEAN NOT NULL DEFAULT 1,
@@ -473,7 +473,7 @@ def run_migrations(engine: Engine) -> None:
 
     hls_batch_migrations = [
         ("request_type", "VARCHAR(32) NOT NULL DEFAULT 'library'"),
-        ("qualities_csv", "VARCHAR(64) NOT NULL DEFAULT '480p,720p,1080p'"),
+        ("qualities_csv", "VARCHAR(64) NOT NULL DEFAULT '480p,720p'"),
         ("skip_existing", "BOOLEAN NOT NULL DEFAULT 1"),
         ("force", "BOOLEAN NOT NULL DEFAULT 0"),
         ("only_missing_hls", "BOOLEAN NOT NULL DEFAULT 1"),
@@ -531,6 +531,62 @@ def run_migrations(engine: Engine) -> None:
     ]
     for col, col_def in hls_batch_item_migrations:
         _add_column_if_missing(engine, "hls_batch_items", col, col_def)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE hls_batches
+                SET qualities_csv = '480p,720p'
+                WHERE trim(coalesce(qualities_csv, '')) = ''
+                   OR trim(qualities_csv) = '480p,720p,1080p'
+                """
+            )
+        )
+
+    # ── scheduled_jobs table ─────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS scheduled_jobs (
+                    id INTEGER PRIMARY KEY,
+                    job_type VARCHAR(64) NOT NULL UNIQUE,
+                    name VARCHAR(255) NOT NULL,
+                    enabled BOOLEAN NOT NULL DEFAULT 0,
+                    schedule_type VARCHAR(32) NOT NULL DEFAULT 'daily',
+                    time_of_day VARCHAR(5) NOT NULL DEFAULT '02:00',
+                    days_of_week VARCHAR(32) NULL,
+                    last_run_at DATETIME NULL,
+                    next_run_at DATETIME NULL,
+                    last_status VARCHAR(32) NULL,
+                    last_error TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    scheduled_job_migrations = [
+        ("job_type", "VARCHAR(64)"),
+        ("name", "VARCHAR(255)"),
+        ("enabled", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("schedule_type", "VARCHAR(32) NOT NULL DEFAULT 'daily'"),
+        ("time_of_day", "VARCHAR(5) NOT NULL DEFAULT '02:00'"),
+        ("days_of_week", "VARCHAR(32) NULL"),
+        ("last_run_at", "DATETIME NULL"),
+        ("next_run_at", "DATETIME NULL"),
+        ("last_status", "VARCHAR(32) NULL"),
+        ("last_error", "TEXT NULL"),
+        ("created_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+        ("updated_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+    ]
+    for col, col_def in scheduled_job_migrations:
+        _add_column_if_missing(engine, "scheduled_jobs", col, col_def)
+
+    _create_index_if_missing(engine, "ix_scheduled_jobs_job_type", "scheduled_jobs", "job_type")
+    _create_index_if_missing(engine, "ix_scheduled_jobs_next_run_at", "scheduled_jobs", "next_run_at")
 
     # ── library_roots table ───────────────────────────────────────────────────
     with engine.begin() as conn:

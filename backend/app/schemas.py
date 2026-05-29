@@ -685,6 +685,32 @@ class PathValidationResult(BaseModel):
     message: str
 
 
+class ScheduledJobOut(BaseModel):
+    id: int
+    job_type: str
+    name: str
+    enabled: bool
+    schedule_type: str
+    time_of_day: str
+    days_of_week: str | None = None
+    last_run_at: datetime | None = None
+    next_run_at: datetime | None = None
+    last_status: str | None = None
+    last_error: str | None = None
+
+
+class ScheduledJobUpdateIn(BaseModel):
+    enabled: bool
+    schedule_type: str = "daily"
+    time_of_day: str
+
+
+class ScheduledJobRunNowOut(BaseModel):
+    status: str
+    job_type: str
+    reason: str | None = None
+
+
 class MediaSourceBrowseItem(BaseModel):
     name: str
     relative_path: str    # e.g. "sclad/Movies"

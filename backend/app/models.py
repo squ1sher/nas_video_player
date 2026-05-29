@@ -286,7 +286,7 @@ class HlsBatch(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
     request_type: Mapped[str] = mapped_column(String(32), nullable=False, default="library")
-    qualities_csv: Mapped[str] = mapped_column(String(64), nullable=False, default="480p,720p,1080p")
+    qualities_csv: Mapped[str] = mapped_column(String(64), nullable=False, default="480p,720p")
     skip_existing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     force: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     only_missing_hls: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -324,4 +324,25 @@ class HlsBatchItem(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ScheduledJob(Base):
+    __tablename__ = "scheduled_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    job_type: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    schedule_type: Mapped[str] = mapped_column(String(32), nullable=False, default="daily")
+    time_of_day: Mapped[str] = mapped_column(String(5), nullable=False, default="02:00")
+    days_of_week: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
 

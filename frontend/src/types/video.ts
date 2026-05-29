@@ -527,6 +527,32 @@ export type PlaybackSource = {
   reason: string;
 };
 
+export type ScheduledJob = {
+  id: number;
+  job_type: "library_scan" | "hls_prepare_missing";
+  name: string;
+  enabled: boolean;
+  schedule_type: "daily";
+  time_of_day: string;
+  days_of_week: string | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+};
+
+export type ScheduledJobUpdate = {
+  enabled: boolean;
+  schedule_type: "daily";
+  time_of_day: string;
+};
+
+export type ScheduledJobRunNowResponse = {
+  status: "started" | "skipped";
+  job_type: string;
+  reason?: string;
+};
+
 export type HealthStatus = {
   status: string;
   runtime_dirs: Record<string, string>;
