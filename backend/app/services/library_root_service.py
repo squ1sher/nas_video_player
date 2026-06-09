@@ -16,6 +16,7 @@ from app.utils.files import safe_resolve_under_root
 logger = logging.getLogger(__name__)
 
 DEFAULT_LIBRARY_ROOT_NAME = "Default"
+ALLOWED_MEDIA_TYPES = {"video", "photo", "mixed"}
 
 # Synology host mount root – displayed to the user as the "host" prefix.
 # /volume1 is mounted as /media in the container.
@@ -197,18 +198,28 @@ def browse_media_sources(
     except ValueError:
         return []
 
-    if not browse_target.exists() or not browse_target.is_dir():
+    try:
+        if not browse_target.exists() or not browse_target.is_dir():
+            return []
+    except OSError:
         return []
 
     # Collect already-configured paths for quick lookup
-    existing_paths: set[str] = {
-        Path(r.path).resolve(strict=False).as_posix()
-        for (r,) in db.query(LibraryRoot).with_entities(LibraryRoot.path).all()
-    }
+    existing_paths: set[str] = set()
+    for (path_str,) in db.query(LibraryRoot).with_entities(LibraryRoot.path).all():
+        try:
+            existing_paths.add(Path(path_str).resolve(strict=False).as_posix())
+        except OSError:
+            continue
 
     entries: list[MediaSourceBrowseEntry] = []
     try:
-        for child in sorted(browse_target.iterdir()):
+        children = sorted(browse_target.iterdir(), key=lambda p: p.name.lower())
+    except OSError:
+        return []
+
+    for child in children:
+        try:
             if not child.is_dir():
                 continue
             if child.name.startswith(".") or child.name.lower() in _BROWSE_HIDDEN_NAMES:
@@ -230,8 +241,9 @@ def browse_media_sources(
                     blocked=blocked,
                 )
             )
-    except PermissionError:
-        pass
+        except OSError:
+            # Skip problematic filesystem entries instead of failing the whole browse request.
+            continue
 
     return entries
 
@@ -250,11 +262,14 @@ def _dedupe_root_configs(configs: list[dict[str, object]]) -> list[dict[str, obj
         if normalized_path in seen_paths:
             continue
         seen_paths.add(normalized_path)
+        media_type = str(config.get("media_type") or "video").strip().lower() or "video"
+        if media_type not in ALLOWED_MEDIA_TYPES:
+            media_type = "video"
         result.append(
             {
                 "name": str(config.get("name") or DEFAULT_LIBRARY_ROOT_NAME).strip() or DEFAULT_LIBRARY_ROOT_NAME,
                 "path": normalized_path,
-                "media_type": str(config.get("media_type") or "video").strip() or "video",
+                "media_type": media_type,
                 "enabled": bool(config.get("enabled", True)),
                 "recursive": bool(config.get("recursive", True)),
                 "scan_priority": int(config.get("scan_priority", 100)),

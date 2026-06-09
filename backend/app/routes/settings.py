@@ -26,6 +26,20 @@ from app.services.library_root_service import (
 )
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+ALLOWED_MEDIA_TYPES = {"video", "photo", "mixed"}
+
+
+def _normalize_media_type(raw: str | None) -> str:
+    value = (raw or "video").strip().lower() or "video"
+    if value not in ALLOWED_MEDIA_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_media_type",
+                "message": "media_type must be one of: video, photo, mixed",
+            },
+        )
+    return value
 
 
 def _enrich_root_out(
@@ -136,7 +150,7 @@ def create_media_source(
     root = LibraryRoot(
         name=body.name,
         path=normalized_path,
-        media_type=body.media_type,
+        media_type=_normalize_media_type(body.media_type),
         enabled=body.enabled,
         recursive=body.recursive,
         scan_priority=body.scan_priority,
@@ -195,7 +209,7 @@ def update_media_source(
     if body.name is not None:
         root.name = body.name
     if body.media_type is not None:
-        root.media_type = body.media_type
+        root.media_type = _normalize_media_type(body.media_type)
     if body.enabled is not None:
         root.enabled = body.enabled
     if body.recursive is not None:

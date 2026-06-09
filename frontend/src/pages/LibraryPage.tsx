@@ -5,6 +5,7 @@ import {
   bulkAssignTags,
   bulkDeleteVideos,
   createPlaylist,
+  fetchMedia,
   fetchVideos,
   getPlaylists,
 } from "../api/client";
@@ -17,11 +18,12 @@ import { AddToPlaylistDialog } from "../components/playlists/AddToPlaylistDialog
 import { TagFilterDialog } from "../components/tags/TagFilterDialog";
 import type { TagFilterState } from "../components/tags/TagFilterDialog";
 import { TagSelectorDialog } from "../components/tags/TagSelectorDialog";
-import type { PlaylistSummary, VideoBulkDeleteResult, VideoListItem } from "../types/video";
+import type { PlaylistSummary, UnifiedMediaItem, VideoBulkDeleteResult, VideoListItem } from "../types/video";
 import { buildFolderTree } from "../utils/buildFolderTree";
 import { groupVideos } from "../utils/groupVideos";
 
 type Tab = "all" | "folders" | "playlists";
+type LibraryMode = "videos" | "photos" | "all";
 
 type SourceGroup = {
   key: string;
@@ -33,6 +35,13 @@ type VisibleGroup = {
   key: string;
   title: string;
   videos: VideoListItem[];
+  totalCount: number;
+};
+
+type MediaVisibleGroup = {
+  key: string;
+  title: string;
+  items: UnifiedMediaItem[];
   totalCount: number;
 };
 
@@ -59,11 +68,20 @@ function formatSize(bytes: number): string {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
+function formatMediaGroupTitle(value: string | null): string {
+  if (!value) return "Unknown date";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+  return date.toLocaleString(undefined, { month: "long", year: "numeric" });
+}
+
 export function LibraryPage() {
   const navigate = useNavigate();
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const [mode, setMode] = useState<LibraryMode>("videos");
   const [tab, setTab] = useState<Tab>("all");
   const [videos, setVideos] = useState<VideoListItem[]>([]);
+  const [mediaItems, setMediaItems] = useState<UnifiedMediaItem[]>([]);
   const [folderVideos, setFolderVideos] = useState<VideoListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [folderLoading, setFolderLoading] = useState(true);
@@ -94,6 +112,23 @@ export function LibraryPage() {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const groupedVideos = useMemo(() => groupVideos(videos, { sort, order }), [videos, sort, order]);
+  const groupedMedia = useMemo(() => {
+    const groups = new Map<string, MediaVisibleGroup>();
+    for (const item of mediaItems) {
+      const title = formatMediaGroupTitle(item.date);
+      const key = title.toLowerCase();
+      const existing = groups.get(key);
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        groups.set(key, { key, title, items: [item], totalCount: 0 });
+      }
+    }
+    return [...groups.values()].map((group) => ({
+      ...group,
+      totalCount: group.items.length,
+    }));
+  }, [mediaItems]);
   const hasActiveTagFilter = tagFilter.withoutTags || tagFilter.selectedTagIds.length > 0;
 
   const activeTagChipItems = useMemo(() => {
@@ -128,19 +163,45 @@ export function LibraryPage() {
     return result;
   }, [groupedVideos, visibleCount]);
 
+  const visibleGroupedMedia = useMemo<MediaVisibleGroup[]>(() => {
+    let remaining = visibleCount;
+    const result: MediaVisibleGroup[] = [];
+    for (const group of groupedMedia) {
+      if (remaining <= 0) break;
+      const visibleItems = group.items.slice(0, remaining);
+      if (visibleItems.length > 0) {
+        result.push({
+          key: group.key,
+          title: group.title,
+          items: visibleItems,
+          totalCount: group.totalCount,
+        });
+        remaining -= visibleItems.length;
+      }
+    }
+    return result;
+  }, [groupedMedia, visibleCount]);
+
   const totalVisibleVideos = useMemo(
     () => visibleGroupedVideos.reduce((count, group) => count + group.videos.length, 0),
     [visibleGroupedVideos]
   );
 
+  const totalVisibleMedia = useMemo(
+    () => visibleGroupedMedia.reduce((count, group) => count + group.items.length, 0),
+    [visibleGroupedMedia]
+  );
+
   const canLoadMoreVideos = totalVisibleVideos < videos.length;
+  const canLoadMoreMedia = totalVisibleMedia < mediaItems.length;
 
   const visibleVideos = useMemo(() => {
+    if (mode !== "videos") return [];
     if (tab === "all") {
       return visibleGroupedVideos.flatMap((group) => group.videos);
     }
     return folderVideos;
-  }, [folderVideos, tab, visibleGroupedVideos]);
+  }, [folderVideos, mode, tab, visibleGroupedVideos]);
 
   const selectedVideos = useMemo(() => {
     const selected = selectedIds;
@@ -206,13 +267,27 @@ export function LibraryPage() {
     setPlaylists(data);
   };
 
+  const loadMediaItems = async (nextMode: LibraryMode) => {
+    const mediaType = nextMode === "videos" ? "video" : nextMode === "photos" ? "photo" : "all";
+    const payload = await fetchMedia({
+      type: mediaType,
+      search: search.trim() || undefined,
+      sort: sort === "size" ? "file_size" : "date",
+      order,
+    });
+    setMediaItems(payload.items);
+  };
+
   useEffect(() => {
     let isMounted = true;
 
     const run = async () => {
       try {
         setError(null);
-        if (tab === "all") {
+        if (mode !== "videos") {
+          setLoading(true);
+          await loadMediaItems(mode);
+        } else if (tab === "all") {
           setLoading(true);
           await loadAllVideos();
         } else if (tab === "folders") {
@@ -238,7 +313,7 @@ export function LibraryPage() {
     return () => {
       isMounted = false;
     };
-  }, [tab, search, sort, order, tagFilter]);
+  }, [mode, tab, search, sort, order, tagFilter]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -265,6 +340,16 @@ export function LibraryPage() {
   useEffect(() => {
     if (tab !== "playlists" || true) return; // playlist detail now uses separate page
   }, [tab]);
+
+  useEffect(() => {
+    if (mode !== "videos") {
+      setTab("all");
+      if (selectionMode) {
+        setSelectedIds(new Set());
+        setSelectionMode(false);
+      }
+    }
+  }, [mode, selectionMode]);
 
   const handleSortChange = (nextSort: SortField, nextOrder: SortOrder) => {
     setSort(nextSort);
@@ -295,7 +380,7 @@ export function LibraryPage() {
 
   useEffect(() => {
     setVisibleCount(LIBRARY_INITIAL_ITEMS);
-  }, [tab, search, sort, order, tagFilter]);
+  }, [mode, tab, search, sort, order, tagFilter]);
 
   useEffect(() => {
     if (tab === "playlists" && selectionMode) {
@@ -452,13 +537,20 @@ export function LibraryPage() {
       <header className="library-compact-header">
         <div className="library-title-mini">Library</div>
         <nav className="lib-tabs lib-tabs-compact">
-          <button className={tab === "all" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("all")}>All Videos</button>
-          <button className={tab === "folders" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("folders")}>Folders</button>
-          <button className={tab === "playlists" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("playlists")}>Playlists</button>
+          <button className={mode === "videos" ? "tab-btn active" : "tab-btn"} onClick={() => setMode("videos")}>Videos</button>
+          <button className={mode === "photos" ? "tab-btn active" : "tab-btn"} onClick={() => setMode("photos")}>Photos</button>
+          <button className={mode === "all" ? "tab-btn active" : "tab-btn"} onClick={() => setMode("all")}>All</button>
         </nav>
+        {mode === "videos" ? (
+          <nav className="lib-tabs lib-tabs-compact">
+            <button className={tab === "all" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("all")}>All Videos</button>
+            <button className={tab === "folders" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("folders")}>Folders</button>
+            <button className={tab === "playlists" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("playlists")}>Playlists</button>
+          </nav>
+        ) : null}
         <div className="library-controls-compact">
-          {tab !== "playlists" ? <SearchBar value={search} onChange={setSearch} /> : null}
-          {tab !== "playlists" ? <SortSelect sort={sort} order={order} onChange={handleSortChange} /> : null}
+          {(mode !== "videos" || tab !== "playlists") ? <SearchBar value={search} onChange={setSearch} /> : null}
+          {(mode !== "videos" || tab !== "playlists") ? <SortSelect sort={sort} order={order} onChange={handleSortChange} /> : null}
           {selectionMode ? <span className="library-selected-count">{selectionLabel}</span> : null}
 
           <div className="library-menu" ref={menuRef}>
@@ -466,10 +558,10 @@ export function LibraryPage() {
             {menuOpen ? (
               <div className="library-menu-dropdown">
                 <button className="library-menu-item" onClick={() => navigate("/settings")}>Settings</button>
-                {tab === "playlists" ? (
+                {mode === "videos" && tab === "playlists" ? (
                   <button className="library-menu-item" onClick={openCreatePlaylist}>Create playlist</button>
                 ) : null}
-                {tab !== "playlists" ? (
+                {mode === "videos" && tab !== "playlists" ? (
                   hasActiveTagFilter ? (
                     <>
                       <button className="library-menu-item" onClick={() => { setTagFilterDialogOpen(true); setMenuOpen(false); }}>
@@ -486,9 +578,9 @@ export function LibraryPage() {
                   )
                 ) : null}
 
-                {!selectionMode && tab !== "playlists" ? (
+                {!selectionMode && mode === "videos" && tab !== "playlists" ? (
                   <button className="library-menu-item" onClick={openSelectionMode}>Select</button>
-                ) : selectionMode ? (
+                ) : selectionMode && mode === "videos" ? (
                   <>
                     <button className="library-menu-item" onClick={() => { clearSelectionAndExit(); setMenuOpen(false); }}>
                       Exit selection
@@ -522,7 +614,7 @@ export function LibraryPage() {
         </div>
       </header>
 
-      {hasActiveTagFilter && tab !== "playlists" ? (
+      {mode === "videos" && hasActiveTagFilter && tab !== "playlists" ? (
         <div className="library-active-filter-row">
           {visibleTagChipItems.map((chip) => (
             <button
@@ -547,7 +639,7 @@ export function LibraryPage() {
       {error && <div className="error">{error}</div>}
       {actionNotice && <div className="notice">{actionNotice}</div>}
 
-      {tab === "all" && (
+      {mode === "videos" && tab === "all" && (
         <>
           {loading ? (
             <div className="status">Loading videos...</div>
@@ -593,7 +685,7 @@ export function LibraryPage() {
         </>
       )}
 
-      {tab === "folders" && (
+      {mode === "videos" && tab === "folders" && (
         <div className="folders-panel">
           {folderLoading ? (
             <div className="status">Loading folders...</div>
@@ -632,7 +724,7 @@ export function LibraryPage() {
         </div>
       )}
 
-      {tab === "playlists" && (
+      {mode === "videos" && tab === "playlists" && (
         <div className="playlists-panel">
           {playlistLoading ? (
             <div className="status">Loading playlists...</div>
@@ -654,6 +746,61 @@ export function LibraryPage() {
             </div>
           )}
         </div>
+      )}
+
+      {mode !== "videos" && (
+        <>
+          {loading ? (
+            <div className="status">Loading media...</div>
+          ) : mediaItems.length === 0 ? (
+            <div className="status">
+              {mode === "photos" ? "No photos found. Add a Photo or Mixed source and run a scan." : "No media found."}
+            </div>
+          ) : (
+            <div className="video-group-list">
+              {visibleGroupedMedia.map((group) => (
+                <section key={group.key} className="video-group-section">
+                  <div className="video-group-header">
+                    <span>{group.title} - {group.items.length} / {group.totalCount} items</span>
+                  </div>
+                  <div className="video-grid video-grid-grouped">
+                    {group.items.map((item) => (
+                      <button
+                        key={`${item.type}-${item.id}`}
+                        className="video-card compact"
+                        onClick={() => navigate(item.type === "video" ? `/watch/${item.id}` : `/photo/${item.id}`)}
+                        title={item.display_title}
+                      >
+                        {item.thumbnail_url ? (
+                          <img src={item.thumbnail_url} alt={item.display_title} className="thumb" loading="lazy" />
+                        ) : (
+                          <div className="thumb-fallback">No thumbnail</div>
+                        )}
+                        <div className="overlay">
+                          <div className="top-row">
+                            <span className="title" style={{ maxWidth: "100%" }}>{item.display_title}</span>
+                          </div>
+                          <div className="meta-row">
+                            <span>{item.type === "video" ? "Video" : "Photo"}</span>
+                            <span>{item.extension}</span>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+              <div className="library-load-more-row">
+                <span className="library-load-more-count">Showing {totalVisibleMedia} of {mediaItems.length}</span>
+                {canLoadMoreMedia ? (
+                  <button className="btn-secondary" onClick={loadMoreVideos}>Load more</button>
+                ) : (
+                  <span className="library-load-more-done">All items loaded</span>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <TagSelectorDialog

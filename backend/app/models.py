@@ -27,6 +27,48 @@ class LibraryRoot(Base):
     )
 
 
+class Photo(Base):
+    __tablename__ = "photos"
+    __table_args__ = (UniqueConstraint("media_source_id", "relative_path", name="uq_photos_source_relative_path"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    media_source_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("library_roots.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    relative_path: Mapped[str] = mapped_column(String(1024), nullable=False, index=True)
+    internal_path: Mapped[str] = mapped_column(String(2048), nullable=False)
+    display_path: Mapped[str] = mapped_column(String(2048), nullable=False)
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    extension: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    file_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    file_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    date_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    orientation: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    camera_make: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    camera_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lens_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    iso: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    exposure_time: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    aperture: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    focal_length: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    preview_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    media_identity: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
+    scan_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    thumbnail_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    thumbnail_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scan_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_format: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Video(Base):
     __tablename__ = "videos"
     __table_args__ = (UniqueConstraint("library_root_id", "relative_path", name="uq_videos_root_relative_path"),)
@@ -123,6 +165,16 @@ class VideoTag(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     video_id: Mapped[int] = mapped_column(Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, index=True)
+    tag_id: Mapped[int] = mapped_column(Integer, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PhotoTag(Base):
+    __tablename__ = "photo_tags"
+    __table_args__ = (UniqueConstraint("photo_id", "tag_id", name="uq_photo_tags_photo_tag"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    photo_id: Mapped[int] = mapped_column(Integer, ForeignKey("photos.id", ondelete="CASCADE"), nullable=False, index=True)
     tag_id: Mapped[int] = mapped_column(Integer, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

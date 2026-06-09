@@ -229,6 +229,21 @@ def test_browse_does_not_escape_media_root(tmp_path: Path) -> None:
     assert resp.status_code == 200
 
 
+def test_browse_endpoint_handles_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Browse endpoint returns an empty list when the filesystem raises OSError."""
+    setup_test_db(tmp_path)
+    client = make_client(tmp_path)
+
+    def _boom(_self):
+        raise OSError("simulated filesystem error")
+
+    monkeypatch.setattr(Path, "iterdir", _boom)
+
+    resp = client.get("/api/settings/media-sources/browse")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
 def test_validate_root_source_rejected(tmp_path: Path) -> None:
     """Validating the media root path returns root_source_not_allowed."""
     setup_test_db(tmp_path)
@@ -783,7 +798,7 @@ def test_audio_extensions_skipped_quickly(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_image_extensions_skipped_quickly(tmp_path: Path, monkeypatch) -> None:
-    """Well-known image extensions are skipped without probing."""
+    """Video sources ignore image files without probing."""
     setup_test_db(tmp_path)
     root = tmp_path / "videos" / "image_test"
     root.mkdir(parents=True)
@@ -810,7 +825,7 @@ def test_image_extensions_skipped_quickly(tmp_path: Path, monkeypatch) -> None:
     db.close()
 
     assert len(probe_called) == 0, "Image files should not be probed"
-    assert result.ignored_excluded == 5
+    assert result.ignored_non_media == 5
 
 
 

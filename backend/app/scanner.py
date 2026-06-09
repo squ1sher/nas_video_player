@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.media_probe import probe_video
-from app.models import LibraryRoot, Video, WatchProgress
+from app.models import LibraryRoot, Photo, Video, WatchProgress
 from app.scan_status import (
     cancel_scan,
     fail_scan,
@@ -24,6 +24,7 @@ from app.services.library_root_service import (
     bootstrap_library_roots,
     clean_up_invalid_default_source,
     get_enabled_library_roots,
+    path_to_display,
 )
 from app.services.media_profile_service import (
     assign_profile_to_video,
@@ -32,8 +33,9 @@ from app.services.media_profile_service import (
     upsert_media_profile,
 )
 from app.services.hls_service import reconcile_hls_variants_for_video
+from app.services.photo_service import extract_photo_metadata, generate_photo_thumbnail, upsert_photo_record
 from app.thumbnails import ensure_thumbnail
-from app.utils.files import VIDEO_EXTENSIONS
+from app.utils.files import VIDEO_EXTENSIONS, is_photo_file, is_raw_photo_file
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,100 @@ class ScanResult:
     cancelled: bool = False
     message: str | None = None
     errors: list[str] = field(default_factory=list)
+
+
+def _root_supports_video(media_type: str) -> bool:
+    return media_type in {"video", "mixed"}
+
+
+def _root_supports_photo(media_type: str) -> bool:
+    return media_type in {"photo", "mixed"}
+
+
+def _existing_photo_record(db: Session, file_path: Path, media_source_id: int | None, relative_path: str) -> Photo | None:
+    existing = db.query(Photo).filter(Photo.internal_path == str(file_path)).first()
+    if existing is not None:
+        return existing
+    if media_source_id is None:
+        return None
+    return (
+        db.query(Photo)
+        .filter(
+            Photo.media_source_id == media_source_id,
+            Photo.relative_path == relative_path,
+        )
+        .first()
+    )
+
+
+def _scan_photo_file(
+    db: Session,
+    settings: Settings,
+    file_path: Path,
+    root: Path,
+    media_source_id: int | None,
+    result: ScanResult,
+    *,
+    stat_size: int,
+    stat_mtime: float,
+    stat_birthtime: float | None,
+    existing: Photo | None,
+) -> None:
+    relative_path = file_path.relative_to(root).as_posix()
+    display_path = path_to_display(file_path, settings)
+
+    if (
+        existing is not None
+        and existing.file_size == stat_size
+        and existing.file_modified_at is not None
+        and abs(existing.file_modified_at.timestamp() - stat_mtime) < 1e-6
+    ):
+        result.existing_unchanged += 1
+        increment_progress(existing_unchanged_inc=1)
+        return
+
+    metadata = extract_photo_metadata(file_path, stat_mtime, stat_birthtime)
+    added, updated, saved_photo = upsert_photo_record(
+        db,
+        existing,
+        file_path,
+        root,
+        media_source_id=media_source_id,
+        stat_size=stat_size,
+        stat_mtime=stat_mtime,
+        stat_birthtime=stat_birthtime,
+        metadata=metadata,
+        display_path=display_path,
+        thumbnail_path=None,
+        thumbnail_status="pending",
+        thumbnail_error=None,
+        scan_status="indexed",
+        scan_error=None,
+    )
+
+    if metadata.raw_format or is_raw_photo_file(file_path):
+        saved_photo.thumbnail_status = "skipped"
+        saved_photo.thumbnail_error = "RAW thumbnail generation is not implemented in this phase"
+    else:
+        thumbnail_result = generate_photo_thumbnail(file_path, settings.thumbnails_path, saved_photo.id)
+        if thumbnail_result.path is not None:
+            saved_photo.thumbnail_path = str(thumbnail_result.path.relative_to(settings.thumbnails_path).as_posix())
+            saved_photo.thumbnail_status = "generated"
+            saved_photo.thumbnail_error = None
+            result.thumbnails_generated += 1
+            increment_progress(thumbnails_generated_inc=1)
+        else:
+            saved_photo.thumbnail_status = "failed"
+            saved_photo.thumbnail_error = thumbnail_result.error or "Thumbnail generation failed"
+            result.thumbnail_errors += 1
+            increment_progress(thumbnail_errors_inc=1)
+
+    if added:
+        result.added += 1
+        increment_progress(added_inc=1)
+    if updated:
+        result.updated += 1
+        increment_progress(updated_inc=1)
 
 
 def iter_library_files(root: Path, recursive: bool = True) -> list[Path]:
@@ -236,12 +332,15 @@ def _scan_root_files(
     root: Path,
     library_root_id: int | None,
     result: ScanResult,
+    media_type: str,
     recursive: bool = True,
 ) -> bool:
     """
     Scan all files under ``root`` and update ``result`` in place.
     Returns True if the scan was cancelled during this root.
     """
+    allow_videos = _root_supports_video(media_type)
+    allow_photos = _root_supports_photo(media_type)
     files = iter_library_files(root, recursive=recursive)
     logger.info("Root %s: found %d candidate files", root, len(files))
 
@@ -263,6 +362,41 @@ def _scan_root_files(
             folder_path = _compute_folder_path(file_path, root)
             stat = file_path.stat()
             extension = file_path.suffix.lower()
+
+            if is_photo_file(file_path):
+                if not allow_photos:
+                    result.ignored_non_media += 1
+                    increment_progress(ignored_non_media_inc=1)
+                    continue
+
+                existing_photo = _existing_photo_record(db, file_path, library_root_id, relative_path)
+                _scan_photo_file(
+                    db,
+                    settings,
+                    file_path,
+                    root,
+                    library_root_id,
+                    result,
+                    stat_size=stat.st_size,
+                    stat_mtime=stat.st_mtime,
+                    stat_birthtime=getattr(stat, "st_birthtime", None),
+                    existing=existing_photo,
+                )
+                continue
+
+            if extension not in VIDEO_EXTENSIONS:
+                if extension in settings.excluded_extensions_set:
+                    result.ignored_excluded += 1
+                    increment_progress(ignored_excluded_inc=1)
+                else:
+                    result.ignored_non_media += 1
+                    increment_progress(ignored_non_media_inc=1)
+                continue
+
+            if not allow_videos:
+                result.ignored_non_media += 1
+                increment_progress(ignored_non_media_inc=1)
+                continue
 
             if extension in settings.excluded_extensions_set:
                 result.ignored_excluded += 1
@@ -556,6 +690,39 @@ def _cleanup_missing_videos(
     return removed
 
 
+def _cleanup_missing_photos(
+    db: Session,
+    scanned_root_ids: set[int],
+    root_map: dict[int, Path],
+) -> int:
+    removed = 0
+    all_photos = db.query(Photo).all()
+
+    for photo in all_photos:
+        if is_cancellation_requested():
+            break
+        try:
+            if photo.media_source_id is not None:
+                if photo.media_source_id not in scanned_root_ids:
+                    continue
+                root_path = root_map[photo.media_source_id]
+                disk_path = root_path / photo.relative_path
+            else:
+                disk_path = Path(photo.internal_path)
+
+            if not disk_path.exists() or not disk_path.is_file():
+                logger.info("Source file missing, removing photo from index: %s", photo.relative_path)
+                db.delete(photo)
+                removed += 1
+                increment_progress(removed_missing_inc=1)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Error checking file for removal %s: %s", photo.relative_path, exc)
+
+    if removed:
+        db.commit()
+    return removed
+
+
 # ── Main scan orchestrator ─────────────────────────────────────────────────
 
 
@@ -604,9 +771,22 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
             db.commit()
             continue
 
-        logger.info("Scanning root: %s (id=%s, recursive=%s)", root_path, root_record.id, root_record.recursive)
+        effective_media_type = (root_record.media_type or "video").strip().lower() or "video"
+        logger.info(
+            "Scanning root: %s (id=%s, media_type=%s, recursive=%s)",
+            root_path,
+            root_record.id,
+            effective_media_type,
+            root_record.recursive,
+        )
         cancelled = _scan_root_files(
-            db, settings, root_path, root_record.id, result, recursive=root_record.recursive
+            db,
+            settings,
+            root_path,
+            root_record.id,
+            result,
+            media_type=effective_media_type,
+            recursive=root_record.recursive,
         )
 
         if cancelled:
@@ -633,8 +813,9 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
     update_current_root(None)
 
     # Remove DB records whose source files no longer exist
-    removed = _cleanup_missing_videos(db, settings, scanned_root_ids, root_map)
-    result.removed_missing = removed
+    removed_videos = _cleanup_missing_videos(db, settings, scanned_root_ids, root_map)
+    removed_photos = _cleanup_missing_photos(db, scanned_root_ids, root_map)
+    result.removed_missing = removed_videos + removed_photos
 
     db.commit()
     logger.info(

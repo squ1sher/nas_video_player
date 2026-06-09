@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     excluded_extensions: str = Field(
         default=(
             ".mp3,.flac,.wav,.m4a,.aac,.ogg,.wma,.opus"
-            ",.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.bmp,.tiff,.avif,.svg"
+            ",.gif,.bmp,.avif,.svg"
             ",.txt,.nfo,.srt,.ass,.ssa,.sub,.idx,.vtt"
             ",.db,.sqlite,.json,.xml,.log,.tmp,.part,.crdownload,.ds_store"
             ",.zip,.rar,.7z,.tar,.gz"

@@ -606,6 +606,66 @@ export type MediaSourceBrowseItem = {
   blocked: boolean;
 };
 
+export type PhotoDetail = {
+  id: number;
+  media_source_id: number | null;
+  media_source_name: string | null;
+  relative_path: string;
+  internal_path: string;
+  display_path: string;
+  filename: string;
+  extension: string;
+  file_size: number;
+  file_created_at: string | null;
+  file_modified_at: string | null;
+  captured_at: string | null;
+  date_source: string | null;
+  width: number | null;
+  height: number | null;
+  orientation: number | null;
+  camera_make: string | null;
+  camera_model: string | null;
+  lens_model: string | null;
+  iso: number | null;
+  exposure_time: string | null;
+  aperture: string | null;
+  focal_length: string | null;
+  thumbnail_url: string | null;
+  preview_url: string | null;
+  media_identity: string | null;
+  raw_format: boolean;
+  scan_status: string;
+  thumbnail_status: string;
+  thumbnail_error: string | null;
+  scan_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UnifiedMediaItem = {
+  id: number;
+  type: "video" | "photo";
+  display_title: string;
+  thumbnail_url: string | null;
+  date: string | null;
+  date_source: string | null;
+  file_size: number;
+  width: number | null;
+  height: number | null;
+  extension: string;
+  duration: number | null;
+  raw_format: boolean;
+  media_source_id: number | null;
+  media_source_name: string | null;
+  folder_path: string | null;
+  tags: VideoTagLite[];
+};
+
+export type UnifiedMediaList = {
+  items: UnifiedMediaItem[];
+  total: number;
+};
+
 // ── Maintenance / Cleanup types ────────────────────────────────────────────
 
 export type CleanupHlsSummary = {

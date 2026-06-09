@@ -39,6 +39,8 @@ import type {
   TagTreeMove,
   TagTreePatchResult,
   TagTreeNode,
+  PhotoDetail,
+  UnifiedMediaList,
   VideoDetail,
   VideoListItem,
   VideoBulkDeleteResult,
@@ -118,6 +120,28 @@ export async function fetchVideos(params: {
 
 export async function fetchVideo(id: string | number): Promise<VideoDetail> {
   return handleResponse<VideoDetail>(await fetch(`${API_BASE}/videos/${id}`));
+}
+
+export async function fetchPhoto(id: string | number): Promise<PhotoDetail> {
+  return handleResponse<PhotoDetail>(await fetch(`${API_BASE}/photos/${id}`));
+}
+
+export async function fetchMedia(params: {
+  type?: "video" | "photo" | "all";
+  search?: string;
+  sort?: "date" | "file_size";
+  order?: SortOrder;
+  media_source_id?: number;
+}): Promise<UnifiedMediaList> {
+  const query = new URLSearchParams();
+  if (params.type) query.set("type", params.type);
+  if (params.search) query.set("search", params.search);
+  if (params.sort) query.set("sort", params.sort);
+  if (params.order) query.set("order", params.order);
+  if (params.media_source_id !== undefined) query.set("media_source_id", String(params.media_source_id));
+
+  const suffix = query.toString() ? `?${query}` : "";
+  return handleResponse<UnifiedMediaList>(await fetch(`${API_BASE}/media${suffix}`));
 }
 
 export async function getPlaybackSource(videoId: number): Promise<PlaybackSource> {
@@ -340,6 +364,10 @@ export async function getDuplicateSummary(): Promise<DuplicateSummary> {
 
 export function getDownloadUrl(videoId: number): string {
   return `${API_BASE}/videos/${videoId}/download`;
+}
+
+export function getPhotoOriginalUrl(photoId: number): string {
+  return `${API_BASE}/photos/${photoId}/original`;
 }
 
 export async function deleteVideo(videoId: number): Promise<{ deleted: boolean }> {

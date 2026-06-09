@@ -620,6 +620,88 @@ def run_migrations(engine: Engine) -> None:
     _create_index_if_missing(engine, "ix_videos_relative_path", "videos", "relative_path")
     _create_index_if_missing(engine, "ix_videos_absolute_path", "videos", "absolute_path")
 
+    # ── photos table ───────────────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS photos (
+                    id INTEGER PRIMARY KEY,
+                    media_source_id INTEGER NULL REFERENCES library_roots(id) ON DELETE SET NULL,
+                    relative_path VARCHAR(1024) NOT NULL,
+                    internal_path VARCHAR(2048) NOT NULL,
+                    display_path VARCHAR(2048) NOT NULL,
+                    filename VARCHAR(512) NOT NULL,
+                    extension VARCHAR(16) NOT NULL,
+                    file_size INTEGER NOT NULL,
+                    file_created_at DATETIME NULL,
+                    file_modified_at DATETIME NULL,
+                    captured_at DATETIME NULL,
+                    date_source VARCHAR(32) NULL,
+                    width INTEGER NULL,
+                    height INTEGER NULL,
+                    orientation INTEGER NULL,
+                    camera_make VARCHAR(128) NULL,
+                    camera_model VARCHAR(128) NULL,
+                    lens_model VARCHAR(128) NULL,
+                    iso INTEGER NULL,
+                    exposure_time VARCHAR(64) NULL,
+                    aperture VARCHAR(32) NULL,
+                    focal_length VARCHAR(32) NULL,
+                    thumbnail_path VARCHAR(1024) NULL,
+                    preview_path VARCHAR(1024) NULL,
+                    media_identity VARCHAR(255) NULL UNIQUE,
+                    scan_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    thumbnail_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    thumbnail_error TEXT NULL,
+                    scan_error TEXT NULL,
+                    raw_format BOOLEAN NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_photos_source_relative_path UNIQUE (media_source_id, relative_path)
+                )
+                """
+            )
+        )
+
+    _create_index_if_missing(engine, "ix_photos_media_source_id", "photos", "media_source_id")
+    _create_index_if_missing(engine, "ix_photos_relative_path", "photos", "relative_path")
+    _create_index_if_missing(engine, "ix_photos_extension", "photos", "extension")
+    _create_index_if_missing(engine, "ix_photos_captured_at", "photos", "captured_at")
+    _create_index_if_missing(engine, "ix_photos_media_identity", "photos", "media_identity")
+    _create_index_if_missing(engine, "ix_photos_scan_status", "photos", "scan_status")
+    _create_index_if_missing(engine, "ix_photos_thumbnail_status", "photos", "thumbnail_status")
+
+    # ── photo_tags table ───────────────────────────────────────────────────────
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS photo_tags (
+                    id INTEGER PRIMARY KEY,
+                    photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+                    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    if _table_exists(engine, "photo_tags"):
+        _add_column_if_missing(engine, "photo_tags", "created_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP")
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_photo_tags_photo_tag
+                ON photo_tags (photo_id, tag_id)
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_photo_tags_photo_id ON photo_tags (photo_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_photo_tags_tag_id ON photo_tags (tag_id)"))
+
     # ── tags table (hierarchical) ─────────────────────────────────────────────
     with engine.begin() as conn:
         conn.execute(

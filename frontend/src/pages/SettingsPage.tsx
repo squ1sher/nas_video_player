@@ -667,7 +667,7 @@ export function SettingsPage() {
                   <tr key={s.id} className={s.enabled ? "" : "row-disabled"}>
                     <td>{s.name}</td>
                     <td><code title={`Container: ${s.path}`}>{s.display_path || s.path}</code></td>
-                    <td>{s.media_type}</td>
+                    <td>{s.media_type === "photo" ? "Photo" : s.media_type === "mixed" ? "Mixed (legacy)" : "Video"}</td>
                     <td>
                       <button
                         className={`toggle-btn ${s.enabled ? "toggle-on" : "toggle-off"}`}
@@ -1072,6 +1072,18 @@ export function SettingsPage() {
                   {validation.valid ? "✓ " : "✗ "}{validation.message}
                 </div>
               )}
+
+              <label className="form-label">
+                Source type
+                <select
+                  className="form-input"
+                  value={form.media_type ?? "video"}
+                  onChange={(e) => setForm((f) => ({ ...f, media_type: e.target.value as "video" | "photo" }))}
+                >
+                  <option value="video">Video</option>
+                  <option value="photo">Photo</option>
+                </select>
+              </label>
 
               <label className="form-label form-label-inline">
                 <input

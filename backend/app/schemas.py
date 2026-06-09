@@ -721,9 +721,69 @@ class MediaSourceBrowseItem(BaseModel):
     blocked: bool
 
 
-class PathValidationResult(BaseModel):
-    valid: bool
-    path: Optional[str] = None
-    code: Optional[str] = None
-    message: str
+class PhotoOut(BaseModel):
+    id: int
+    media_source_id: int | None = None
+    media_source_name: str | None = None
+    relative_path: str
+    internal_path: str
+    display_path: str
+    filename: str
+    extension: str
+    file_size: int
+    file_created_at: datetime | None = None
+    file_modified_at: datetime | None = None
+    captured_at: datetime | None = None
+    date_source: str | None = None
+    width: int | None = None
+    height: int | None = None
+    orientation: int | None = None
+    camera_make: str | None = None
+    camera_model: str | None = None
+    lens_model: str | None = None
+    iso: int | None = None
+    exposure_time: str | None = None
+    aperture: str | None = None
+    focal_length: str | None = None
+    thumbnail_url: str | None = None
+    preview_url: str | None = None
+    media_identity: str | None = None
+    raw_format: bool = False
+    scan_status: str = "pending"
+    thumbnail_status: str = "pending"
+    thumbnail_error: str | None = None
+    scan_error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PhotoDetailOut(PhotoOut):
+    pass
+
+
+class MediaItemOut(BaseModel):
+    id: int
+    type: str
+    display_title: str
+    thumbnail_url: str | None = None
+    date: datetime | None = None
+    date_source: str | None = None
+    file_size: int
+    width: int | None = None
+    height: int | None = None
+    extension: str
+    duration: float | None = None
+    raw_format: bool = False
+    media_source_id: int | None = None
+    media_source_name: str | None = None
+    folder_path: str | None = None
+    tags: list[TagOut] = Field(default_factory=list)
+
+
+class MediaListQueryOut(BaseModel):
+    items: list[MediaItemOut]
+    total: int
+
 
