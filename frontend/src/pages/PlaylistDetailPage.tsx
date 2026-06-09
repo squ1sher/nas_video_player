@@ -11,6 +11,7 @@ import {
   updatePlaylist,
 } from "../api/client";
 import type { SortField, SortOrder } from "../api/client";
+import { GroupCheckbox } from "../components/GroupCheckbox";
 import { SearchBar } from "../components/SearchBar";
 import { VideoCard } from "../components/VideoCard";
 import { TagFilterDialog } from "../components/tags/TagFilterDialog";
@@ -381,6 +382,16 @@ export function PlaylistDetailPage() {
     });
   };
 
+  const toggleGroupVideoSelection = (videoIds: number[]) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = videoIds.every((id) => next.has(id));
+      if (allSelected) videoIds.forEach((id) => next.delete(id));
+      else videoIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
   const openSelectionMode = () => {
     setSelectionMode(true);
     setMenuOpen(false);
@@ -728,34 +739,63 @@ export function PlaylistDetailPage() {
             </div>
           ) : (
             <div className="video-group-list">
-              {visibleGroups.map((group) => (
-                <section key={group.key} className="video-group-section">
-                  {/* Show group header only when there are multiple groups */}
-                  {groupedItems.length > 1 ? (
-                    <button
-                      className="video-group-header video-group-toggle"
-                      onClick={() => toggleGroup(group.key)}
-                    >
-                      <span>{collapsedGroups.has(group.key) ? ">" : "v"}</span>
-                      <span>{group.title} – {group.videos.length} / {group.totalCount} videos</span>
-                    </button>
-                  ) : null}
-                  {!collapsedGroups.has(group.key) ? (
-                    <div className="video-grid video-grid-grouped">
-                      {group.videos.map((video) => (
-                        <VideoCard
-                          key={video.id}
-                          video={video}
-                          playlistId={playlistId}
-                          selectionMode={selectionMode}
-                          selected={selectedIds.has(video.id)}
-                          onToggleSelect={toggleSelected}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                </section>
-              ))}
+              {visibleGroups.map((group) => {
+                const groupVideoIds = group.videos.map((v) => v.id);
+                const selectedInGroupCount = selectionMode
+                  ? groupVideoIds.filter((id) => selectedIds.has(id)).length
+                  : 0;
+                const groupChecked =
+                  selectedInGroupCount > 0 && selectedInGroupCount === groupVideoIds.length;
+                const groupIndeterminate =
+                  selectedInGroupCount > 0 && selectedInGroupCount < groupVideoIds.length;
+
+                return (
+                  <section key={group.key} className="video-group-section">
+                    {/* Show group header only when there are multiple groups */}
+                    {groupedItems.length > 1 ? (
+                      <div className="video-group-header">
+                        {selectionMode ? (
+                          <GroupCheckbox
+                            checked={groupChecked}
+                            indeterminate={groupIndeterminate}
+                            disabled={groupVideoIds.length === 0}
+                            onChange={() => toggleGroupVideoSelection(groupVideoIds)}
+                            label={`Select all loaded items in ${group.title}`}
+                          />
+                        ) : null}
+                        <button
+                          className="video-group-toggle"
+                          onClick={() => toggleGroup(group.key)}
+                        >
+                          <span>{collapsedGroups.has(group.key) ? "▶" : "▼"}</span>
+                          <span>
+                            {group.title} – {group.videos.length} / {group.totalCount} videos
+                            {selectionMode && selectedInGroupCount > 0 ? (
+                              <span className="video-group-select-count">
+                                {" "}· {selectedInGroupCount} / {groupVideoIds.length} selected
+                              </span>
+                            ) : null}
+                          </span>
+                        </button>
+                      </div>
+                    ) : null}
+                    {!collapsedGroups.has(group.key) ? (
+                      <div className="video-grid video-grid-grouped">
+                        {group.videos.map((video) => (
+                          <VideoCard
+                            key={video.id}
+                            video={video}
+                            playlistId={playlistId}
+                            selectionMode={selectionMode}
+                            selected={selectedIds.has(video.id)}
+                            onToggleSelect={toggleSelected}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })}
 
               <div className="library-load-more-row">
                 <span className="library-load-more-count">Showing {totalVisible} of {filteredItems.length}</span>

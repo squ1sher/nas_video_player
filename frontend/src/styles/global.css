@@ -564,6 +564,9 @@ button {
 }
 
 .video-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   border-bottom: 1px solid #2b2b2b;
   padding-bottom: 6px;
   color: #b9c6d4;
@@ -574,14 +577,47 @@ button {
 }
 
 .video-group-toggle {
-  width: 100%;
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
   background: transparent;
   border: none;
   text-align: left;
-  padding: 0 0 6px;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+/* Group-level selection checkbox (shown in selection mode) */
+.group-select-checkbox {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: #66a9e8;
+}
+
+/* "12 / 60 selected" annotation inside group header */
+.video-group-select-count {
+  font-size: 11px;
+  color: #8899aa;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+/* Info text inside the library menu (e.g. unsupported bulk action notice) */
+.library-menu-info {
+  display: block;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #8899aa;
+  cursor: default;
 }
 
 /* ── Video card ── */

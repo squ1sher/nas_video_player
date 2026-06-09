@@ -10,6 +10,7 @@ import {
   getPlaylists,
 } from "../api/client";
 import type { SortField, SortOrder } from "../api/client";
+import { GroupCheckbox } from "../components/GroupCheckbox";
 import { SearchBar } from "../components/SearchBar";
 import { SortSelect } from "../components/SortSelect";
 import { VideoCard } from "../components/VideoCard";
@@ -95,6 +96,8 @@ export function LibraryPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectedMediaKeys, setSelectedMediaKeys] = useState<Set<string>>(new Set());
+  const [collapsedMediaGroups, setCollapsedMediaGroups] = useState<Set<string>>(new Set());
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagFilterDialogOpen, setTagFilterDialogOpen] = useState(false);
   const [tagFilter, setTagFilter] = useState<TagFilterState>({ selectedTagIds: [], mode: "any", withoutTags: false });
@@ -344,12 +347,11 @@ export function LibraryPage() {
   useEffect(() => {
     if (mode !== "videos") {
       setTab("all");
-      if (selectionMode) {
-        setSelectedIds(new Set());
-        setSelectionMode(false);
-      }
+      setSelectedIds(new Set());       // clear video selection when leaving videos mode
+    } else {
+      setSelectedMediaKeys(new Set()); // clear media selection when entering videos mode
     }
-  }, [mode, selectionMode]);
+  }, [mode]);
 
   const handleSortChange = (nextSort: SortField, nextOrder: SortOrder) => {
     setSort(nextSort);
@@ -382,6 +384,25 @@ export function LibraryPage() {
     setVisibleCount(LIBRARY_INITIAL_ITEMS);
   }, [mode, tab, search, sort, order, tagFilter]);
 
+  // Clear stale media selection when filters/mode change
+  useEffect(() => {
+    setSelectedMediaKeys(new Set());
+  }, [mode, search, sort, order, tagFilter]);
+
+  // Prune stale media keys when visibleGroupedMedia changes (Load more updates valid set)
+  useEffect(() => {
+    if (!selectionMode || mode === "videos") return;
+    const validKeys = new Set(
+      visibleGroupedMedia.flatMap((g) => g.items).map((item) => `${item.type}:${item.id}`)
+    );
+    setSelectedMediaKeys((prev) => {
+      const next = new Set<string>();
+      prev.forEach((k) => { if (validKeys.has(k)) next.add(k); });
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleGroupedMedia]);
+
   useEffect(() => {
     if (tab === "playlists" && selectionMode) {
       setSelectedIds(new Set());
@@ -391,6 +412,7 @@ export function LibraryPage() {
 
   const clearSelectionAndExit = () => {
     setSelectedIds(new Set());
+    setSelectedMediaKeys(new Set());
     setSelectionMode(false);
   };
 
@@ -439,6 +461,48 @@ export function LibraryPage() {
       const next = new Set(prev);
       if (next.has(videoId)) next.delete(videoId);
       else next.add(videoId);
+      return next;
+    });
+  };
+
+  // ── Typed key for unified media items (photos/all mode) ─────────────────────
+  const getMediaItemKey = (item: UnifiedMediaItem): string => `${item.type}:${item.id}`;
+
+  const toggleMediaItem = (key: string) => {
+    setSelectedMediaKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // ── Group-level selection toggles ────────────────────────────────────────────
+  const toggleGroupVideoSelection = (videoIds: number[]) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = videoIds.every((id) => next.has(id));
+      if (allSelected) videoIds.forEach((id) => next.delete(id));
+      else videoIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const toggleGroupMediaSelection = (itemKeys: string[]) => {
+    setSelectedMediaKeys((prev) => {
+      const next = new Set(prev);
+      const allSelected = itemKeys.every((k) => next.has(k));
+      if (allSelected) itemKeys.forEach((k) => next.delete(k));
+      else itemKeys.forEach((k) => next.add(k));
+      return next;
+    });
+  };
+
+  const toggleMediaGroup = (groupKey: string) => {
+    setCollapsedMediaGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
       return next;
     });
   };
@@ -530,7 +594,10 @@ export function LibraryPage() {
     }
   };
 
-  const selectionLabel = `Selected: ${selectedVideos.length}`;
+  const selectionLabel =
+    mode === "videos"
+      ? `Selected: ${selectedVideos.length}`
+      : `Selected: ${selectedMediaKeys.size}`;
 
   return (
     <div className="page page-library-compact">
@@ -578,34 +645,44 @@ export function LibraryPage() {
                   )
                 ) : null}
 
-                {!selectionMode && mode === "videos" && tab !== "playlists" ? (
+                {!selectionMode && tab !== "playlists" ? (
                   <button className="library-menu-item" onClick={openSelectionMode}>Select</button>
-                ) : selectionMode && mode === "videos" ? (
+                ) : selectionMode ? (
                   <>
                     <button className="library-menu-item" onClick={() => { clearSelectionAndExit(); setMenuOpen(false); }}>
                       Exit selection
                     </button>
-                    <button
-                      className="library-menu-item"
-                      onClick={() => { setTagDialogOpen(true); setMenuOpen(false); }}
-                      disabled={selectedVideos.length === 0}
-                    >
-                      Add tag to selected
-                    </button>
-                    <button
-                      className="library-menu-item"
-                      onClick={() => { setPlaylistDialogOpen(true); setMenuOpen(false); }}
-                      disabled={selectedVideos.length === 0}
-                    >
-                      Add to playlist
-                    </button>
-                    <button
-                      className="library-menu-item library-menu-item-danger"
-                      onClick={openDeleteDialog}
-                      disabled={selectedVideos.length === 0}
-                    >
-                      Delete selected
-                    </button>
+                    {mode === "videos" ? (
+                      <>
+                        <button
+                          className="library-menu-item"
+                          onClick={() => { setTagDialogOpen(true); setMenuOpen(false); }}
+                          disabled={selectedVideos.length === 0}
+                        >
+                          Add tag to selected
+                        </button>
+                        <button
+                          className="library-menu-item"
+                          onClick={() => { setPlaylistDialogOpen(true); setMenuOpen(false); }}
+                          disabled={selectedVideos.length === 0}
+                        >
+                          Add to playlist
+                        </button>
+                        <button
+                          className="library-menu-item library-menu-item-danger"
+                          onClick={openDeleteDialog}
+                          disabled={selectedVideos.length === 0}
+                        >
+                          Delete selected
+                        </button>
+                      </>
+                    ) : (
+                      <span className="library-menu-info">
+                        {selectedMediaKeys.size > 0
+                          ? `${selectedMediaKeys.size} item(s) selected`
+                          : "Select items with checkboxes"}
+                      </span>
+                    )}
                   </>
                 ) : null}
               </div>
@@ -651,27 +728,59 @@ export function LibraryPage() {
             </div>
           ) : (
             <div className="video-group-list">
-              {visibleGroupedVideos.map((group) => (
-                <section key={group.key} className="video-group-section">
-                  <button className="video-group-header video-group-toggle" onClick={() => toggleVideoGroup(group.key)}>
-                    <span>{collapsedVideoGroups.has(group.key) ? ">" : "v"}</span>
-                    <span>{group.title} - {group.videos.length} / {group.totalCount} videos</span>
-                  </button>
-                  {!collapsedVideoGroups.has(group.key) && (
-                    <div className="video-grid video-grid-grouped">
-                      {group.videos.map((video) => (
-                        <VideoCard
-                          key={video.id}
-                          video={video}
-                          selectionMode={selectionMode}
-                          selected={selectedIds.has(video.id)}
-                          onToggleSelect={toggleSelected}
+              {visibleGroupedVideos.map((group) => {
+                const groupVideoIds = group.videos.map((v) => v.id);
+                const selectedInGroupCount = selectionMode
+                  ? groupVideoIds.filter((id) => selectedIds.has(id)).length
+                  : 0;
+                const groupChecked =
+                  selectedInGroupCount > 0 && selectedInGroupCount === groupVideoIds.length;
+                const groupIndeterminate =
+                  selectedInGroupCount > 0 && selectedInGroupCount < groupVideoIds.length;
+
+                return (
+                  <section key={group.key} className="video-group-section">
+                    <div className="video-group-header">
+                      {selectionMode ? (
+                        <GroupCheckbox
+                          checked={groupChecked}
+                          indeterminate={groupIndeterminate}
+                          disabled={groupVideoIds.length === 0}
+                          onChange={() => toggleGroupVideoSelection(groupVideoIds)}
+                          label={`Select all loaded items in ${group.title}`}
                         />
-                      ))}
+                      ) : null}
+                      <button
+                        className="video-group-toggle"
+                        onClick={() => toggleVideoGroup(group.key)}
+                      >
+                        <span>{collapsedVideoGroups.has(group.key) ? "▶" : "▼"}</span>
+                        <span>
+                          {group.title} · {group.videos.length} / {group.totalCount} videos
+                          {selectionMode && selectedInGroupCount > 0 ? (
+                            <span className="video-group-select-count">
+                              {" "}· {selectedInGroupCount} / {groupVideoIds.length} selected
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
                     </div>
-                  )}
-                </section>
-              ))}
+                    {!collapsedVideoGroups.has(group.key) && (
+                      <div className="video-grid video-grid-grouped">
+                        {group.videos.map((video) => (
+                          <VideoCard
+                            key={video.id}
+                            video={video}
+                            selectionMode={selectionMode}
+                            selected={selectedIds.has(video.id)}
+                            onToggleSelect={toggleSelected}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
               <div className="library-load-more-row">
                 <span className="library-load-more-count">Showing {totalVisibleVideos} of {videos.length}</span>
                 {canLoadMoreVideos ? (
@@ -758,38 +867,111 @@ export function LibraryPage() {
             </div>
           ) : (
             <div className="video-group-list">
-              {visibleGroupedMedia.map((group) => (
-                <section key={group.key} className="video-group-section">
-                  <div className="video-group-header">
-                    <span>{group.title} - {group.items.length} / {group.totalCount} items</span>
-                  </div>
-                  <div className="video-grid video-grid-grouped">
-                    {group.items.map((item) => (
+              {visibleGroupedMedia.map((group) => {
+                const groupItemKeys = group.items.map(getMediaItemKey);
+                const selectedInGroupCount = selectionMode
+                  ? groupItemKeys.filter((k) => selectedMediaKeys.has(k)).length
+                  : 0;
+                const groupChecked =
+                  selectedInGroupCount > 0 && selectedInGroupCount === groupItemKeys.length;
+                const groupIndeterminate =
+                  selectedInGroupCount > 0 && selectedInGroupCount < groupItemKeys.length;
+                const isCollapsed = collapsedMediaGroups.has(group.key);
+
+                return (
+                  <section key={group.key} className="video-group-section">
+                    <div className="video-group-header">
+                      {selectionMode ? (
+                        <GroupCheckbox
+                          checked={groupChecked}
+                          indeterminate={groupIndeterminate}
+                          disabled={groupItemKeys.length === 0}
+                          onChange={() => toggleGroupMediaSelection(groupItemKeys)}
+                          label={`Select all loaded items in ${group.title}`}
+                        />
+                      ) : null}
                       <button
-                        key={`${item.type}-${item.id}`}
-                        className="video-card compact"
-                        onClick={() => navigate(item.type === "video" ? `/watch/${item.id}` : `/photo/${item.id}`)}
-                        title={item.display_title}
+                        className="video-group-toggle"
+                        onClick={() => toggleMediaGroup(group.key)}
                       >
-                        {item.thumbnail_url ? (
-                          <img src={item.thumbnail_url} alt={item.display_title} className="thumb" loading="lazy" />
-                        ) : (
-                          <div className="thumb-fallback">No thumbnail</div>
-                        )}
-                        <div className="overlay">
-                          <div className="top-row">
-                            <span className="title" style={{ maxWidth: "100%" }}>{item.display_title}</span>
-                          </div>
-                          <div className="meta-row">
-                            <span>{item.type === "video" ? "Video" : "Photo"}</span>
-                            <span>{item.extension}</span>
-                          </div>
-                        </div>
+                        <span>{isCollapsed ? "▶" : "▼"}</span>
+                        <span>
+                          {group.title} · {group.items.length} / {group.totalCount} items
+                          {selectionMode && selectedInGroupCount > 0 ? (
+                            <span className="video-group-select-count">
+                              {" "}· {selectedInGroupCount} / {groupItemKeys.length} selected
+                            </span>
+                          ) : null}
+                        </span>
                       </button>
-                    ))}
-                  </div>
-                </section>
-              ))}
+                    </div>
+                    {!isCollapsed ? (
+                      <div className="video-grid video-grid-grouped">
+                        {group.items.map((item) => {
+                          const itemKey = getMediaItemKey(item);
+                          const isSelected = selectionMode && selectedMediaKeys.has(itemKey);
+                          return (
+                            <button
+                              key={`${item.type}-${item.id}`}
+                              type="button"
+                              className={`video-card compact${selectionMode ? " video-card-selection-mode" : ""}${isSelected ? " video-card-selected" : ""}`}
+                              onClick={() => {
+                                if (selectionMode) {
+                                  toggleMediaItem(itemKey);
+                                } else {
+                                  navigate(
+                                    item.type === "video"
+                                      ? `/watch/${item.id}`
+                                      : `/photo/${item.id}`
+                                  );
+                                }
+                              }}
+                              title={item.display_title}
+                            >
+                              <div style={{ position: "relative" }}>
+                                {item.thumbnail_url ? (
+                                  <img
+                                    src={item.thumbnail_url}
+                                    alt={item.display_title}
+                                    className="thumb"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="thumb-fallback">No thumbnail</div>
+                                )}
+                                {selectionMode ? (
+                                  <label
+                                    className="video-select-checkbox"
+                                    onClick={(e) => e.stopPropagation()}
+                                    title={isSelected ? "Deselect" : "Select"}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => toggleMediaItem(itemKey)}
+                                    />
+                                  </label>
+                                ) : null}
+                              </div>
+                              <div className="overlay">
+                                <div className="top-row">
+                                  <span className="title" style={{ maxWidth: "100%" }}>
+                                    {item.display_title}
+                                  </span>
+                                </div>
+                                <div className="meta-row">
+                                  <span>{item.type === "video" ? "Video" : "Photo"}</span>
+                                  <span>{item.extension}</span>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })}
               <div className="library-load-more-row">
                 <span className="library-load-more-count">Showing {totalVisibleMedia} of {mediaItems.length}</span>
                 {canLoadMoreMedia ? (
