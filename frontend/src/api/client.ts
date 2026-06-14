@@ -27,6 +27,7 @@ import type {
   PathValidationResult,
   PlaylistAddItemsResult,
   PlaylistBulkRemoveResult,
+  PlaylistContext,
   PlaylistDetail,
   PlaylistSummary,
   PlaybackSource,
@@ -158,7 +159,7 @@ export async function prepareVideoHls(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         force: body.force ?? false,
-        qualities: body.qualities ?? ["480p", "720p"],
+        qualities: body.qualities ?? ["480p"],
       }),
     })
   );
@@ -189,7 +190,7 @@ export async function createLibraryHlsBatch(body: {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        qualities: body.qualities ?? ["480p", "720p"],
+        qualities: body.qualities ?? ["480p"],
         skip_existing: body.skip_existing ?? true,
         force: body.force ?? false,
         only_missing_hls: body.only_missing_hls ?? true,
@@ -535,6 +536,12 @@ export async function deletePlaylist(playlistId: number): Promise<{ deleted: boo
 export async function getPlaylist(playlistId: number): Promise<PlaylistDetail> {
   return handleResponse<PlaylistDetail>(
     await fetch(`${API_BASE}/playlists/${playlistId}?t=${Date.now()}`, { cache: "no-store" })
+  );
+}
+
+export async function getPlaylistContext(playlistId: number, videoId: number): Promise<PlaylistContext> {
+  return handleResponse<PlaylistContext>(
+    await fetch(`${API_BASE}/playlists/${playlistId}/context/${videoId}?t=${Date.now()}`, { cache: "no-store" })
   );
 }
 

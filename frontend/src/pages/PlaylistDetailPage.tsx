@@ -18,8 +18,10 @@ import { TagFilterDialog } from "../components/tags/TagFilterDialog";
 import type { TagFilterState } from "../components/tags/TagFilterDialog";
 import { TagSelectorDialog } from "../components/tags/TagSelectorDialog";
 import type {
+  PlaylistContextItem,
   PlaylistDetail,
   PlaylistItem,
+  StoredPlaylistNav,
   VideoBulkDeleteResult,
   VideoListItem,
 } from "../types/video";
@@ -580,6 +582,46 @@ export function PlaylistDetailPage() {
     return reorderIds.map((id) => byId.get(id)).filter((i): i is PlaylistItem => !!i);
   }, [playlist, reorderIds]);
 
+  // ─── Persist visual sort order so Watch page plays in same sequence ──────────
+
+  useEffect(() => {
+    if (Number.isNaN(playlistId) || !playlist) return;
+    const key = `playlist_nav_${playlistId}`;
+    const isCustomOrder = sort !== "playlist_order" || hasActiveTagFilter || !!search.trim();
+
+    if (isCustomOrder && sortedItems.length > 0) {
+      // Build availability lookup from raw playlist items
+      const availByVideoId = new Map<number, string | null>(
+        playlist.items.map((item) => [item.id, item.video.availability_status])
+      );
+      const sequence: PlaylistContextItem[] = sortedItems.map((video, idx) => ({
+        video_id: video.id,
+        position: idx + 1,
+        display_title: video.title,
+        thumbnail_url: video.thumbnail_url,
+        availability_status: availByVideoId.get(video.id) ?? null,
+      }));
+      const nav: StoredPlaylistNav = {
+        playlist_id: playlistId,
+        playlist_name: playlist.name,
+        sequence,
+        timestamp: Date.now(),
+      };
+      try {
+        sessionStorage.setItem(key, JSON.stringify(nav));
+      } catch {
+        // ignore storage failures
+      }
+    } else {
+      // Default playlist order — let Watch page use backend context (manual position).
+      try {
+        sessionStorage.removeItem(key);
+      } catch {
+        // ignore
+      }
+    }
+  }, [playlistId, sort, hasActiveTagFilter, search, sortedItems, playlist]);
+
   // ─── Render ───────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -673,9 +715,12 @@ export function PlaylistDetailPage() {
         )}
       </header>
 
-      <div className="playlist-browse-note">
-        Playback uses playlist order. Sorting/filtering here only changes the browsing view.
-      </div>
+      {/* Show note only when visual order differs from playlist order */}
+      {(sort !== "playlist_order" || search.trim() || hasActiveTagFilter) && !reorderMode ? (
+        <div className="playlist-browse-note">
+          Playback uses playlist order. Sorting/filtering only changes this view.
+        </div>
+      ) : null}
 
       {/* ── Active tag filter chips ─────────────────────────────────────── */}
       {hasActiveTagFilter && !reorderMode ? (

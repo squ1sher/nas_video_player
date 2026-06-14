@@ -235,3 +235,147 @@ def test_playlist_items_include_tags(tmp_path: Path) -> None:
     tags = detail.json()["items"][0]["video"]["tags"]
     assert tags == [{"id": tag_id, "name": "Family", "path": "Family", "color": None}]
 
+
+# ─── Playlist playback context endpoint ───────────────────────────────────────
+
+def test_context_first_item_has_no_previous(tmp_path: Path) -> None:
+    """First item in manual playlist order must have previous=null."""
+    client = make_client(tmp_path)
+    a = _create_video(tmp_path, "A", "ctx/a.mp4")
+    b = _create_video(tmp_path, "B", "ctx/b.mp4")
+    c = _create_video(tmp_path, "C", "ctx/c.mp4")
+    pl = _create_playlist(client)
+    client.post(f"/api/playlists/{pl}/items", json={"video_ids": [a, b, c]})
+
+    r = client.get(f"/api/playlists/{pl}/context/{a}")
+    assert r.status_code == 200
+    ctx = r.json()
+    assert ctx["total"] == 3
+    assert ctx["current"]["video_id"] == a
+    assert ctx["current"]["position"] == 1
+    assert ctx["previous"] is None
+    assert ctx["next"]["video_id"] == b
+    assert ctx["next"]["position"] == 2
+
+
+def test_context_last_item_has_no_next(tmp_path: Path) -> None:
+    """Last item in manual playlist order must have next=null."""
+    client = make_client(tmp_path)
+    a = _create_video(tmp_path, "A", "ctx2/a.mp4")
+    b = _create_video(tmp_path, "B", "ctx2/b.mp4")
+    c = _create_video(tmp_path, "C", "ctx2/c.mp4")
+    pl = _create_playlist(client)
+    client.post(f"/api/playlists/{pl}/items", json={"video_ids": [a, b, c]})
+
+    r = client.get(f"/api/playlists/{pl}/context/{c}")
+    assert r.status_code == 200
+    ctx = r.json()
+    assert ctx["current"]["video_id"] == c
+    assert ctx["current"]["position"] == 3
+    assert ctx["previous"]["video_id"] == b
+    assert ctx["next"] is None
+
+
+def test_context_middle_item(tmp_path: Path) -> None:
+    """Middle item must have both previous and next by position."""
+    client = make_client(tmp_path)
+    a = _create_video(tmp_path, "A", "ctx3/a.mp4")
+    b = _create_video(tmp_path, "B", "ctx3/b.mp4")
+    c = _create_video(tmp_path, "C", "ctx3/c.mp4")
+    pl = _create_playlist(client)
+    client.post(f"/api/playlists/{pl}/items", json={"video_ids": [a, b, c]})
+
+    r = client.get(f"/api/playlists/{pl}/context/{b}")
+    assert r.status_code == 200
+    ctx = r.json()
+    assert ctx["previous"]["video_id"] == a
+    assert ctx["current"]["video_id"] == b
+    assert ctx["next"]["video_id"] == c
+
+
+def test_context_uses_position_not_date(tmp_path: Path) -> None:
+    """Playback context must follow playlist_items.position, not video dates."""
+    from app.database import SessionLocal
+    from app.models import Video as VideoModel
+    from datetime import datetime, timezone
+
+    client = make_client(tmp_path)
+    # Create videos with deliberately inverted dates
+    a = _create_video(tmp_path, "A", "date/a.mp4")  # will get oldest date
+    b = _create_video(tmp_path, "B", "date/b.mp4")  # middle date
+    c = _create_video(tmp_path, "C", "date/c.mp4")  # newest date
+
+    db = SessionLocal()
+    db.query(VideoModel).filter(VideoModel.id == a).update({"modified_ts": 1000.0})  # oldest
+    db.query(VideoModel).filter(VideoModel.id == b).update({"modified_ts": 2000.0})
+    db.query(VideoModel).filter(VideoModel.id == c).update({"modified_ts": 3000.0})  # newest
+    db.commit()
+    db.close()
+
+    # Manual playlist order: a(1), b(2), c(3) — which is ASC date order too.
+    # But add them reversed so that naive "added_at" order would be c, b, a.
+    pl = _create_playlist(client)
+    client.post(f"/api/playlists/{pl}/items", json={"video_ids": [a, b, c]})
+
+    # Reorder to make manual order: c(1), a(2), b(3)
+    # This conflicts with date order (c is newest but now position=1)
+    client.post(f"/api/playlists/{pl}/items/reorder", json={"video_ids": [c, a, b]})
+
+    r = client.get(f"/api/playlists/{pl}/context/{c}")
+    assert r.status_code == 200
+    ctx = r.json()
+    # c is at position 1 → no previous
+    assert ctx["previous"] is None
+    assert ctx["current"]["video_id"] == c
+    assert ctx["current"]["position"] == 1
+    assert ctx["next"]["video_id"] == a   # a is at position 2 (not b which has newest date)
+
+    r = client.get(f"/api/playlists/{pl}/context/{b}")
+    assert r.status_code == 200
+    ctx = r.json()
+    # b is at position 3 → no next
+    assert ctx["previous"]["video_id"] == a
+    assert ctx["next"] is None
+
+
+def test_context_video_not_in_playlist_returns_404(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    pl = _create_playlist(client)
+    a = _create_video(tmp_path, "A", "notfound/a.mp4")
+
+    r = client.get(f"/api/playlists/{pl}/context/{a}")
+    assert r.status_code == 404
+
+
+def test_context_playlist_not_found_returns_404(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    a = _create_video(tmp_path, "A", "notfound2/a.mp4")
+
+    r = client.get(f"/api/playlists/99999/context/{a}")
+    assert r.status_code == 404
+
+
+def test_context_reordered_playlist_changes_order(tmp_path: Path) -> None:
+    """After reorder, context must reflect new position order."""
+    client = make_client(tmp_path)
+    a = _create_video(tmp_path, "A", "reord/a.mp4")
+    b = _create_video(tmp_path, "B", "reord/b.mp4")
+    c = _create_video(tmp_path, "C", "reord/c.mp4")
+    pl = _create_playlist(client)
+    client.post(f"/api/playlists/{pl}/items", json={"video_ids": [a, b, c]})
+
+    # Verify original: a(1) → b(2) → c(3)
+    ctx = client.get(f"/api/playlists/{pl}/context/{a}").json()
+    assert ctx["next"]["video_id"] == b
+
+    # Reorder to: c(1) → a(2) → b(3)
+    client.post(f"/api/playlists/{pl}/items/reorder", json={"video_ids": [c, a, b]})
+    ctx = client.get(f"/api/playlists/{pl}/context/{c}").json()
+    assert ctx["previous"] is None
+    assert ctx["next"]["video_id"] == a
+
+    ctx = client.get(f"/api/playlists/{pl}/context/{b}").json()
+    assert ctx["previous"]["video_id"] == a
+    assert ctx["next"] is None
+
+

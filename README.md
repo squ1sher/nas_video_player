@@ -661,7 +661,7 @@ You do not need to edit `docker-compose.yml` for every new media subfolder; add 
 
 ```json
 {
-  "qualities": ["480p", "720p"],
+  "qualities": ["480p"],
   "skip_existing": true,
   "force": false,
   "only_missing_hls": true

@@ -251,6 +251,29 @@ class PlaylistBulkRemoveOut(BaseModel):
     item_count: int
 
 
+class PlaylistContextItemOut(BaseModel):
+    """A single entry (current / previous / next) in playlist playback context."""
+    video_id: int
+    position: int
+    display_title: str
+    thumbnail_url: str | None = None
+    availability_status: str | None = None
+
+
+class PlaylistContextOut(BaseModel):
+    """
+    Playlist playback context for a specific video.
+    Order is always by playlist_items.position ASC.
+    Missing videos are skipped for previous/next.
+    """
+    playlist_id: int
+    playlist_name: str
+    total: int
+    current: PlaylistContextItemOut | None = None
+    previous: PlaylistContextItemOut | None = None
+    next: PlaylistContextItemOut | None = None
+
+
 class TagCreateIn(BaseModel):
     name: str
     parent_id: int | None = None

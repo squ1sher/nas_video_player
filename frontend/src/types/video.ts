@@ -666,6 +666,39 @@ export type UnifiedMediaList = {
   total: number;
 };
 
+// ── Playlist playback context ──────────────────────────────────────────────
+
+export type PlaylistContextItem = {
+  video_id: number;
+  position: number;
+  display_title: string;
+  thumbnail_url: string | null;
+  availability_status: string | null;
+};
+
+/** Returned by GET /api/playlists/{id}/context/{video_id}. */
+export type PlaylistContext = {
+  playlist_id: number;
+  playlist_name: string;
+  total: number;
+  current: PlaylistContextItem | null;
+  previous: PlaylistContextItem | null;
+  next: PlaylistContextItem | null;
+};
+
+/**
+ * Stored in sessionStorage by PlaylistDetailPage so that Watch page can play
+ * through the same visual (sorted/filtered) order the user was browsing.
+ * Key: `playlist_nav_${playlist_id}`.
+ */
+export type StoredPlaylistNav = {
+  playlist_id: number;
+  playlist_name: string;
+  /** Full ordered sequence in the current visual sort/filter order. */
+  sequence: PlaylistContextItem[];
+  timestamp: number;
+};
+
 // ── Maintenance / Cleanup types ────────────────────────────────────────────
 
 export type CleanupHlsSummary = {

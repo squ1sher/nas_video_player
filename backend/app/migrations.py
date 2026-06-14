@@ -448,7 +448,7 @@ def run_migrations(engine: Engine) -> None:
                     id INTEGER PRIMARY KEY,
                     status VARCHAR(32) NOT NULL DEFAULT 'queued',
                     request_type VARCHAR(32) NOT NULL DEFAULT 'library',
-                    qualities_csv VARCHAR(64) NOT NULL DEFAULT '480p,720p',
+                    qualities_csv VARCHAR(64) NOT NULL DEFAULT '480p',
                     skip_existing BOOLEAN NOT NULL DEFAULT 1,
                     force BOOLEAN NOT NULL DEFAULT 0,
                     only_missing_hls BOOLEAN NOT NULL DEFAULT 1,
@@ -473,7 +473,7 @@ def run_migrations(engine: Engine) -> None:
 
     hls_batch_migrations = [
         ("request_type", "VARCHAR(32) NOT NULL DEFAULT 'library'"),
-        ("qualities_csv", "VARCHAR(64) NOT NULL DEFAULT '480p,720p'"),
+        ("qualities_csv", "VARCHAR(64) NOT NULL DEFAULT '480p'"),
         ("skip_existing", "BOOLEAN NOT NULL DEFAULT 1"),
         ("force", "BOOLEAN NOT NULL DEFAULT 0"),
         ("only_missing_hls", "BOOLEAN NOT NULL DEFAULT 1"),
@@ -537,8 +537,9 @@ def run_migrations(engine: Engine) -> None:
             text(
                 """
                 UPDATE hls_batches
-                SET qualities_csv = '480p,720p'
+                SET qualities_csv = '480p'
                 WHERE trim(coalesce(qualities_csv, '')) = ''
+                   OR trim(qualities_csv) = '480p,720p'
                    OR trim(qualities_csv) = '480p,720p,1080p'
                 """
             )

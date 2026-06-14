@@ -364,6 +364,102 @@ def bulk_remove_videos_from_playlist(db: Session, *, playlist_id: int, video_ids
     return {"removed": to_remove, "not_found": not_found, "item_count": item_count}
 
 
+def get_playlist_playback_context(
+    db: Session,
+    *,
+    playlist_id: int,
+    video_id: int,
+) -> dict[str, object]:
+    """
+    Return playback context (previous / current / next) for a video inside a playlist.
+
+    Order is determined solely by ``playlist_items.position ASC``.
+    Date, file_modified_at, title, or any other sort key is never used.
+    Videos whose ``availability_status`` is "missing" are skipped when
+    searching for the nearest playable neighbor.
+    """
+    playlist = _get_playlist_or_404(db, playlist_id)
+
+    # Verify the video is in this playlist
+    current_item = (
+        db.query(PlaylistItem)
+        .filter(PlaylistItem.playlist_id == playlist_id, PlaylistItem.video_id == video_id)
+        .first()
+    )
+    if current_item is None:
+        raise PlaylistError("Video not in playlist.", code="video_not_in_playlist")
+
+    current_position = int(current_item.position)
+    total = (
+        db.query(func.count(PlaylistItem.id))
+        .filter(PlaylistItem.playlist_id == playlist_id)
+        .scalar()
+    ) or 0
+
+    # Candidates before current (position < current.position), in DESC order
+    prev_candidates = (
+        db.query(PlaylistItem)
+        .filter(
+            PlaylistItem.playlist_id == playlist_id,
+            PlaylistItem.position < current_position,
+        )
+        .order_by(PlaylistItem.position.desc(), PlaylistItem.id.desc())
+        .all()
+    )
+
+    # Candidates after current (position > current.position), in ASC order
+    next_candidates = (
+        db.query(PlaylistItem)
+        .filter(
+            PlaylistItem.playlist_id == playlist_id,
+            PlaylistItem.position > current_position,
+        )
+        .order_by(PlaylistItem.position.asc(), PlaylistItem.id.asc())
+        .all()
+    )
+
+    # Fetch video records for current + all candidates in one query
+    candidate_video_ids = (
+        {video_id}
+        | {int(item.video_id) for item in prev_candidates}
+        | {int(item.video_id) for item in next_candidates}
+    )
+    videos_by_id: dict[int, Video] = {
+        int(v.id): v
+        for v in db.query(Video).filter(Video.id.in_(candidate_video_ids)).all()
+    }
+
+    def is_playable(item: PlaylistItem) -> bool:
+        vid = videos_by_id.get(int(item.video_id))
+        return vid is not None and vid.availability_status != "missing"
+
+    def make_context_item(item: PlaylistItem | None) -> dict[str, object] | None:
+        if item is None:
+            return None
+        vid = videos_by_id.get(int(item.video_id))
+        thumb_url = f"/api/videos/{item.video_id}/thumbnail" if vid and vid.thumbnail_path else None
+        return {
+            "video_id": int(item.video_id),
+            "position": int(item.position),
+            "display_title": vid.title if vid else f"Video #{item.video_id}",
+            "thumbnail_url": thumb_url,
+            "availability_status": vid.availability_status if vid else "missing",
+        }
+
+    # First non-missing previous/next item
+    prev_item = next((item for item in prev_candidates if is_playable(item)), None)
+    next_item = next((item for item in next_candidates if is_playable(item)), None)
+
+    return {
+        "playlist_id": playlist_id,
+        "playlist_name": playlist.name,
+        "total": total,
+        "current": make_context_item(current_item),
+        "previous": make_context_item(prev_item),
+        "next": make_context_item(next_item),
+    }
+
+
 def remove_video_from_all_playlists(db: Session, *, video_id: int) -> None:
     playlist_ids: list[int] = [
         int(row[0])

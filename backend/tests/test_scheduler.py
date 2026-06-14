@@ -171,7 +171,7 @@ def test_scheduler_run_now_hls_prepare_missing_skips_when_hls_running(tmp_path: 
     batch = HlsBatch(
         status="running",
         request_type="library",
-        qualities_csv="480p,720p",
+        qualities_csv="480p",
         skip_existing=True,
         force=False,
         only_missing_hls=True,

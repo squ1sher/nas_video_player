@@ -7,6 +7,7 @@ from app.schemas import (
     PlaylistAddItemsOut,
     PlaylistBulkRemoveIn,
     PlaylistBulkRemoveOut,
+    PlaylistContextOut,
     PlaylistCreateIn,
     PlaylistDetailOut,
     PlaylistOut,
@@ -20,6 +21,7 @@ from app.services.playlist_service import (
     create_playlist,
     delete_playlist,
     get_playlist_detail,
+    get_playlist_playback_context,
     list_playlists,
     remove_video_from_playlist,
     reorder_playlist_items,
@@ -66,6 +68,22 @@ def get_playlist_route(playlist_id: int, db: Session = Depends(get_db)) -> Playl
         return PlaylistDetailOut(**get_playlist_detail(db, playlist_id=playlist_id))
     except PlaylistError as exc:
         status_code = 404 if exc.code == "playlist_not_found" else 409
+        raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+@router.get("/{playlist_id}/context/{video_id}", response_model=PlaylistContextOut)
+def get_playlist_context_route(
+    playlist_id: int, video_id: int, db: Session = Depends(get_db)
+) -> PlaylistContextOut:
+    """
+    Return playback context (previous / current / next) for a specific video inside a playlist.
+    Order is always by playlist_items.position ASC — never by date, title, or any other key.
+    Missing videos are skipped for previous/next.
+    """
+    try:
+        return PlaylistContextOut(**get_playlist_playback_context(db, playlist_id=playlist_id, video_id=video_id))
+    except PlaylistError as exc:
+        status_code = 404 if exc.code in {"playlist_not_found", "video_not_in_playlist"} else 409
         raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
 
 

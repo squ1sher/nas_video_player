@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   deleteVideo,
   fetchVideo,
-  getPlaylist,
+  getPlaylistContext,
   getPlaybackSource,
   getVideoHlsStatus,
   getDownloadUrl,
@@ -16,7 +16,59 @@ import { CompatibilityBadge } from "../components/CompatibilityBadge";
 import { VideoTagsPanel } from "../components/tags/VideoTagsPanel";
 import { VideoPlayer } from "../components/VideoPlayer";
 import type { VideoTag } from "../types/video";
-import type { HlsVideoStatus, PlaybackSource, PlaylistDetail, VideoDetail, WatchProgress } from "../types/video";
+import type {
+  HlsVideoStatus,
+  PlaybackSource,
+  PlaylistContext,
+  PlaylistContextItem,
+  StoredPlaylistNav,
+  VideoDetail,
+  WatchProgress,
+} from "../types/video";
+
+// ─── Stored-nav helpers ───────────────────────────────────────────────────────
+
+const STORED_NAV_TTL_MS = 3_600_000; // 1 hour
+
+function loadStoredNav(playlistId: number): StoredPlaylistNav | null {
+  try {
+    const raw = sessionStorage.getItem(`playlist_nav_${playlistId}`);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as StoredPlaylistNav;
+    if (!Array.isArray(data?.sequence) || data.sequence.length === 0) return null;
+    if (Date.now() - (data.timestamp ?? 0) > STORED_NAV_TTL_MS) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function buildContextFromNav(nav: StoredPlaylistNav, videoId: number): PlaylistContext | null {
+  const { sequence, playlist_id, playlist_name } = nav;
+  const currentIdx = sequence.findIndex((item) => item.video_id === videoId);
+  if (currentIdx === -1) return null;
+
+  const isPlayable = (item: PlaylistContextItem) => item.availability_status !== "missing";
+
+  let prev: PlaylistContextItem | null = null;
+  for (let i = currentIdx - 1; i >= 0; i--) {
+    if (isPlayable(sequence[i])) { prev = sequence[i]; break; }
+  }
+
+  let next: PlaylistContextItem | null = null;
+  for (let i = currentIdx + 1; i < sequence.length; i++) {
+    if (isPlayable(sequence[i])) { next = sequence[i]; break; }
+  }
+
+  return {
+    playlist_id,
+    playlist_name,
+    total: sequence.length,
+    current: sequence[currentIdx],
+    previous: prev,
+    next,
+  };
+}
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return "Unknown";
@@ -40,21 +92,13 @@ function formatSize(bytes: number): string {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
-type PlaylistNeighbor = {
-  videoId: number;
-  position: number;
-  displayTitle: string;
-  thumbnailUrl: string | null;
-  availabilityStatus: string | null;
-};
-
 type UpNextState =
-  | { kind: "countdown"; target: PlaylistNeighbor; remaining: number }
+  | { kind: "countdown"; target: PlaylistContextItem; remaining: number }
   | { kind: "end" }
   | null;
 
 const PLAYLIST_AUTOPLAY_NEXT_KEY = "playlist_autoplay_next";
-const PLAYLIST_AUTOPLAY_SECONDS = 5;
+const PLAYLIST_AUTOPLAY_SECONDS = 3;
 
 export function WatchPage() {
   const { id } = useParams();
@@ -77,7 +121,7 @@ export function WatchPage() {
   const [hlsBusy, setHlsBusy] = useState(false);
   const [selectedQuality, setSelectedQuality] = useState("auto");
   const [playerQualities, setPlayerQualities] = useState<string[]>([]);
-  const [playlist, setPlaylist] = useState<PlaylistDetail | null>(null);
+  const [playlist, setPlaylist] = useState<PlaylistContext | null>(null);
   const [autoplayNext, setAutoplayNext] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(PLAYLIST_AUTOPLAY_NEXT_KEY) === "true";
@@ -85,7 +129,19 @@ export function WatchPage() {
   const [upNextState, setUpNextState] = useState<UpNextState>(null);
   const upNextTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const upNextTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const upNextTargetRef = useRef<PlaylistNeighbor | null>(null);
+  const upNextTargetRef = useRef<PlaylistContextItem | null>(null);
+
+  // ── Autoplay & fullscreen state ───────────────────────────────────────────
+  /** True when we should auto-start the new video on source load. */
+  const [autoPlayOnLoad, setAutoPlayOnLoad] = useState(false);
+  /** Ref set synchronously before navigate() so the new id-effect can pick it up. */
+  const autoPlayScheduled = useRef(false);
+  /** Whether the player container is in native fullscreen. */
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  /** Ref: should we re-enter fullscreen when the new video loads? */
+  const restoreFullscreenRef = useRef(false);
+  /** Container div that we fullscreen (contains video + playlist overlay). */
+  const playerContainerRef = useRef<HTMLDivElement>(null);
 
   const loadPlaybackData = useCallback(async (videoId: number) => {
     const [source, status] = await Promise.all([getPlaybackSource(videoId), getVideoHlsStatus(videoId)]);
@@ -107,8 +163,16 @@ export function WatchPage() {
         setVideo(vid);
         setProgress(prog);
         if (playlistId !== null && Number.isFinite(playlistId)) {
-          const playlistDetail = await getPlaylist(playlistId);
-          setPlaylist(playlistDetail);
+          // Prefer the stored visual-sort sequence (set by PlaylistDetailPage).
+          // Falls back to backend manual-position context for direct URL access.
+          const storedNav = loadStoredNav(playlistId);
+          const ctxFromNav = storedNav ? buildContextFromNav(storedNav, numericId) : null;
+          if (ctxFromNav) {
+            setPlaylist(ctxFromNav);
+          } else {
+            const ctx = await getPlaylistContext(playlistId, numericId);
+            setPlaylist(ctx);
+          }
         } else {
           setPlaylist(null);
         }
@@ -163,6 +227,45 @@ export function WatchPage() {
     setUpNextState(null);
   }, []);
 
+  // When video id changes: pick up any scheduled autoplay intent
+  useEffect(() => {
+    if (autoPlayScheduled.current) {
+      autoPlayScheduled.current = false;
+      setAutoPlayOnLoad(true);
+    } else {
+      setAutoPlayOnLoad(false);
+    }
+  }, [id]);
+
+  // Track native fullscreen changes
+  useEffect(() => {
+    const handler = () => {
+      const isFull = !!(document.fullscreenElement && playerContainerRef.current?.contains(document.fullscreenElement));
+      setIsFullscreen(isFull);
+
+      // If user entered fullscreen on the <video> itself (not our container),
+      // redirect to the container so our overlay is also in fullscreen.
+      if (document.fullscreenElement && playerContainerRef.current &&
+          document.fullscreenElement !== playerContainerRef.current &&
+          playerContainerRef.current.contains(document.fullscreenElement)) {
+        document.exitFullscreen()
+          .then(() => playerContainerRef.current?.requestFullscreen())
+          .catch(() => {});
+      }
+    };
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  // Restore fullscreen after navigating to next video
+  useEffect(() => {
+    if (!restoreFullscreenRef.current) return;
+    restoreFullscreenRef.current = false;
+    if (!document.fullscreenElement && playerContainerRef.current) {
+      playerContainerRef.current.requestFullscreen().catch(() => {});
+    }
+  }, [id]);
+
   useEffect(() => {
     clearUpNextState();
   }, [id, playlistId, clearUpNextState]);
@@ -192,49 +295,12 @@ export function WatchPage() {
     setSelectedQuality("original");
   }, [playbackSource]);
 
-  const playlistContext = useMemo(() => {
-    if (!playlist || !video) return null;
-
-    const makeNeighbor = (item: PlaylistDetail["items"][number], position: number): PlaylistNeighbor => ({
-      videoId: item.id,
-      position,
-      displayTitle: item.video.display_title,
-      thumbnailUrl: item.video.thumbnail_url,
-      availabilityStatus: item.video.availability_status,
-    });
-
-    const currentIndex = playlist.items.findIndex((item) => item.id === video.id);
-    const findNeighbor = (startIndex: number, step: -1 | 1): PlaylistNeighbor | null => {
-      let index = startIndex + step;
-      while (index >= 0 && index < playlist.items.length) {
-        const item = playlist.items[index];
-        if (item.video.availability_status !== "missing") {
-          return makeNeighbor(item, index + 1);
-        }
-        index += step;
-      }
-      return null;
-    };
-
-    const currentItem = currentIndex >= 0 ? playlist.items[currentIndex] : null;
-    const current = currentItem ? makeNeighbor(currentItem, currentIndex + 1) : null;
-    const previous = currentIndex >= 0 ? findNeighbor(currentIndex, -1) : null;
-    const next = currentIndex >= 0 ? findNeighbor(currentIndex, 1) : null;
-
-    return {
-      playlistId: playlist.id,
-      playlistName: playlist.name,
-      total: playlist.items.length,
-      currentIndex,
-      currentPosition: current ? current.position : 0,
-      current,
-      previous,
-      next,
-    };
-  }, [playlist, video]);
+  // playlist IS the context returned directly from the backend (position-ordered, missing-skipped).
+  // Alias it so existing JSX references remain readable.
+  const playlistContext = playlist;
 
   const startUpNextCountdown = useCallback(
-    (nextItem: PlaylistNeighbor) => {
+    (nextItem: PlaylistContextItem) => {
       if (!playlistContext) return;
       clearUpNextState();
       upNextTargetRef.current = nextItem;
@@ -252,7 +318,9 @@ export function WatchPage() {
         const target = upNextTargetRef.current;
         clearUpNextState();
         if (target) {
-          navigate(`/watch/${target.videoId}?playlist_id=${playlistContext.playlistId}`);
+          autoPlayScheduled.current = true;
+          restoreFullscreenRef.current = !!document.fullscreenElement;
+          navigate(`/watch/${target.video_id}?playlist_id=${playlistContext.playlist_id}`);
         }
       }, PLAYLIST_AUTOPLAY_SECONDS * 1000);
     },
@@ -260,7 +328,7 @@ export function WatchPage() {
   );
 
   const handleVideoEnded = useCallback(() => {
-    if (!playlistContext || playlistContext.currentIndex < 0) return;
+    if (!playlistContext || playlistContext.current === null) return;
 
     if (!autoplayNext) {
       if (!playlistContext.next) {
@@ -280,7 +348,10 @@ export function WatchPage() {
   const goPlaylistVideo = useCallback(
     (nextVideoId: number) => {
       if (!playlistContext) return;
-      navigate(`/watch/${nextVideoId}?playlist_id=${playlistContext.playlistId}`);
+      // Schedule autoplay and fullscreen restoration before navigating
+      autoPlayScheduled.current = true;
+      restoreFullscreenRef.current = !!document.fullscreenElement;
+      navigate(`/watch/${nextVideoId}?playlist_id=${playlistContext.playlist_id}`);
     },
     [navigate, playlistContext]
   );
@@ -289,7 +360,7 @@ export function WatchPage() {
     if (upNextState?.kind !== "countdown") return;
     const target = upNextState.target;
     clearUpNextState();
-    goPlaylistVideo(target.videoId);
+    goPlaylistVideo(target.video_id);
   };
 
   const handleCancelUpNext = () => {
@@ -366,7 +437,7 @@ export function WatchPage() {
     try {
       setHlsBusy(true);
       setActionMessage(null);
-      await prepareVideoHls(video.id, { force: false, qualities: ["480p", "720p"] });
+      await prepareVideoHls(video.id, { force: false, qualities: ["480p"] });
       const status = await getVideoHlsStatus(video.id);
       setHlsStatus(status);
       setActionMessage("Preparing HLS...");
@@ -428,14 +499,14 @@ export function WatchPage() {
         <section className="watch-playlist-strip watch-playlist-panel">
           <div className="watch-playlist-panel-main">
             <div>
-              <strong>{playlistContext.playlistName}</strong>
-              <span className="watch-playlist-meta"> {playlistContext.current ? `${playlistContext.currentPosition} / ${playlistContext.total}` : `${playlistContext.total} item(s)`}</span>
+              <strong>{playlistContext.playlist_name}</strong>
+              <span className="watch-playlist-meta"> {playlistContext.current ? `${playlistContext.current.position} / ${playlistContext.total}` : `${playlistContext.total} item(s)`}</span>
             </div>
             <div className="watch-playlist-actions">
-              <button className="btn-secondary" onClick={() => goPlaylistVideo(playlistContext.previous?.videoId ?? 0)} disabled={!playlistContext.previous}>
+              <button className="btn-secondary" onClick={() => goPlaylistVideo(playlistContext.previous?.video_id ?? 0)} disabled={!playlistContext.previous}>
                 Previous
               </button>
-              <button className="btn-secondary" onClick={() => goPlaylistVideo(playlistContext.next?.videoId ?? 0)} disabled={!playlistContext.next}>
+              <button className="btn-secondary" onClick={() => goPlaylistVideo(playlistContext.next?.video_id ?? 0)} disabled={!playlistContext.next}>
                 Next
               </button>
               {playlistContext.next ? (
@@ -452,15 +523,15 @@ export function WatchPage() {
               {playlistContext.next ? (
                 <>
                   <div className="watch-playlist-up-next-thumb">
-                    {playlistContext.next.thumbnailUrl ? (
-                      <img src={playlistContext.next.thumbnailUrl} alt={playlistContext.next.displayTitle} loading="lazy" decoding="async" />
+                    {playlistContext.next.thumbnail_url ? (
+                      <img src={playlistContext.next.thumbnail_url} alt={playlistContext.next.display_title} loading="lazy" decoding="async" />
                     ) : (
                       <div className="thumb placeholder">No Thumbnail</div>
                     )}
                   </div>
                   <div className="watch-playlist-up-next-copy">
                     <span className="watch-playlist-up-next-label">Up next</span>
-                    <strong>{playlistContext.next.displayTitle}</strong>
+                    <strong>{playlistContext.next.display_title}</strong>
                   </div>
                 </>
               ) : (
@@ -477,7 +548,7 @@ export function WatchPage() {
         <div className="watch-up-next-overlay">
           <div className="watch-up-next-card">
             <div className="watch-up-next-heading">Up next</div>
-            <strong className="watch-up-next-title">{upNextState.target.displayTitle}</strong>
+            <strong className="watch-up-next-title">{upNextState.target.display_title}</strong>
             <div className="watch-up-next-countdown">Playing in {upNextState.remaining} second{upNextState.remaining === 1 ? "" : "s"}</div>
             <div className="watch-up-next-actions">
               <button className="btn-primary" onClick={handlePlayUpNextNow}>Play now</button>
@@ -498,15 +569,69 @@ export function WatchPage() {
         </div>
       )}
 
-      <VideoPlayer
-        video={video}
-        sourceType={playbackSource?.source_type ?? "none"}
-        streamUrl={playbackSource?.stream_url ?? null}
-        selectedQuality={selectedQuality}
-        onAvailableQualities={setPlayerQualities}
-        initialPosition={initialPosition}
-        onEnded={handleVideoEnded}
-      />
+      <div
+        ref={playerContainerRef}
+        className={`player-container${isFullscreen ? " player-container--fullscreen" : ""}`}
+      >
+        <VideoPlayer
+          video={video}
+          sourceType={playbackSource?.source_type ?? "none"}
+          streamUrl={playbackSource?.stream_url ?? null}
+          selectedQuality={selectedQuality}
+          onAvailableQualities={setPlayerQualities}
+          initialPosition={initialPosition}
+          onEnded={handleVideoEnded}
+          autoPlay={autoPlayOnLoad}
+          onPlay={() => setAutoPlayOnLoad(false)}
+        />
+
+        {/* Playlist controls overlay — shown on hover and in fullscreen */}
+        {playlistContext ? (
+          <div className="player-playlist-overlay">
+            <button
+              className="player-overlay-btn"
+              onClick={() => goPlaylistVideo(playlistContext.previous?.video_id ?? 0)}
+              disabled={!playlistContext.previous}
+              title={playlistContext.previous ? `Previous: ${playlistContext.previous.display_title}` : "No previous video"}
+            >
+              ⏮
+            </button>
+            <button
+              className="player-overlay-btn player-overlay-btn--stop"
+              onClick={() => {
+                clearUpNextState();
+                if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+              }}
+              title="Stop / Exit fullscreen"
+            >
+              ⏹
+            </button>
+            <button
+              className="player-overlay-btn"
+              onClick={() => goPlaylistVideo(playlistContext.next?.video_id ?? 0)}
+              disabled={!playlistContext.next}
+              title={playlistContext.next ? `Next: ${playlistContext.next.display_title}` : "End of playlist"}
+            >
+              ⏭
+            </button>
+          </div>
+        ) : null}
+
+        {/* Custom fullscreen toggle */}
+        <button
+          className="player-fullscreen-btn"
+          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          onClick={() => {
+            if (document.fullscreenElement) {
+              document.exitFullscreen().catch(() => {});
+            } else {
+              playerContainerRef.current?.requestFullscreen().catch(() => {});
+            }
+          }}
+        >
+          {isFullscreen ? "⤡" : "⤢"}
+        </button>
+      </div>
 
       {video.media_status === "probe_failed_possible_video" && (
         <div className="notice">

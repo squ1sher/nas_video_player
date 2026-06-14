@@ -338,7 +338,7 @@ class HlsBatch(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
     request_type: Mapped[str] = mapped_column(String(32), nullable=False, default="library")
-    qualities_csv: Mapped[str] = mapped_column(String(64), nullable=False, default="480p,720p")
+    qualities_csv: Mapped[str] = mapped_column(String(64), nullable=False, default="480p")
     skip_existing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     force: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     only_missing_hls: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

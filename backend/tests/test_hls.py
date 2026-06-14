@@ -233,7 +233,7 @@ def test_hls_does_not_upscale_above_source(tmp_path: Path, monkeypatch) -> None:
 
     done = _wait_for_completion(client, video_id)
     assert done["status"] == "completed"
-    assert done["available_qualities"] == ["480p", "720p"]
+    assert done["available_qualities"] == ["480p"]
 
 
 def test_hls_playlist_and_segment_content_types(tmp_path: Path, monkeypatch) -> None:
@@ -664,7 +664,7 @@ def test_library_batch_item_status_filter(tmp_path: Path, monkeypatch) -> None:
     assert all(item["status"] == "skipped" for item in skipped.json()["items"])
 
 
-def test_prepare_hls_without_qualities_uses_480p_720p_defaults(tmp_path: Path, monkeypatch) -> None:
+def test_prepare_hls_without_qualities_uses_480p_default(tmp_path: Path, monkeypatch) -> None:
     _install_fake_ffmpeg(monkeypatch)
     client = make_client(tmp_path)
     video_id = _create_video_with_file(tmp_path, height=1080, width=1920, stem="default_single")
@@ -674,11 +674,10 @@ def test_prepare_hls_without_qualities_uses_480p_720p_defaults(tmp_path: Path, m
 
     done = _wait_for_completion(client, video_id)
     assert done["status"] == "completed"
-    assert done["available_qualities"] == ["480p", "720p"]
-    assert "1080p" not in done["available_qualities"]
+    assert done["available_qualities"] == ["480p"]
 
 
-def test_library_batch_without_qualities_uses_480p_720p_defaults(tmp_path: Path, monkeypatch) -> None:
+def test_library_batch_without_qualities_uses_480p_default(tmp_path: Path, monkeypatch) -> None:
     _install_fake_ffmpeg(monkeypatch)
     client = make_client(tmp_path)
     _create_video_with_file(tmp_path, stem="default_batch")
@@ -694,7 +693,7 @@ def test_library_batch_without_qualities_uses_480p_720p_defaults(tmp_path: Path,
     db = SessionLocal()
     batch = db.query(HlsBatch).filter(HlsBatch.id == batch_id).first()
     assert batch is not None
-    assert batch.qualities_csv == "480p,720p"
+    assert batch.qualities_csv == "480p"
     db.close()
 
 

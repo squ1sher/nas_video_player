@@ -14,6 +14,9 @@ type Props = {
   initialPosition?: number;
   onError?: () => void;
   onEnded?: () => void;
+  onPlay?: () => void;
+  /** If true, call el.play() as soon as the source is ready. */
+  autoPlay?: boolean;
 };
 
 export function VideoPlayer({
@@ -25,11 +28,19 @@ export function VideoPlayer({
   initialPosition = 0,
   onError,
   onEnded,
+  onPlay,
+  autoPlay = false,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [playerError, setPlayerError] = useState(false);
+
+  // Keep a ref so the source-setup effect always sees the latest value
+  // without needing autoPlay in its dependency array (which would cause
+  // extra teardown/setup on every render).
+  const autoPlayRef = useRef(autoPlay);
+  useEffect(() => { autoPlayRef.current = autoPlay; }, [autoPlay]);
 
   const applyHlsQuality = (hls: Hls, quality: string) => {
     if (quality === "auto") {
@@ -62,6 +73,7 @@ export function VideoPlayer({
     }
   };
 
+  // ── Source setup ──────────────────────────────────────────────────────────
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -82,10 +94,9 @@ export function VideoPlayer({
     if (sourceType === "hls") {
       if (el.canPlayType("application/vnd.apple.mpegurl")) {
         el.src = streamUrl;
+        if (autoPlayRef.current) el.play().catch(() => {});
       } else if (Hls.isSupported()) {
-        const hls = new Hls({
-          enableWorker: true,
-        });
+        const hls = new Hls({ enableWorker: true });
         hlsRef.current = hls;
         hls.loadSource(streamUrl);
         hls.attachMedia(el);
@@ -94,6 +105,7 @@ export function VideoPlayer({
             .sort((a, b) => Number(a.replace("p", "")) - Number(b.replace("p", "")));
           onAvailableQualities?.(["auto", ...mapped]);
           applyHlsQuality(hls, selectedQuality);
+          if (autoPlayRef.current) el.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
@@ -108,6 +120,7 @@ export function VideoPlayer({
     } else {
       el.src = streamUrl;
       onAvailableQualities?.(["original"]);
+      if (autoPlayRef.current) el.play().catch(() => {});
     }
 
     return () => {
@@ -124,6 +137,7 @@ export function VideoPlayer({
     applyHlsQuality(hls, selectedQuality);
   }, [selectedQuality, sourceType]);
 
+  // ── Event listeners ───────────────────────────────────────────────────────
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -134,7 +148,10 @@ export function VideoPlayer({
       }
     };
 
-    const onPlay = () => startSaveInterval(el);
+    const onPlayEvent = () => {
+      startSaveInterval(el);
+      onPlay?.();
+    };
     const onPause = () => {
       stopSaveInterval();
       saveProgress(el);
@@ -147,24 +164,24 @@ export function VideoPlayer({
     };
 
     const onBeforeUnload = () => {
-      saveProgress(el, true); // keepalive=true for page close
+      saveProgress(el, true);
     };
 
     el.addEventListener("loadedmetadata", onLoadedMetadata);
-    el.addEventListener("play", onPlay);
+    el.addEventListener("play", onPlayEvent);
     el.addEventListener("pause", onPause);
     el.addEventListener("ended", onVideoEnded);
     window.addEventListener("beforeunload", onBeforeUnload);
 
     return () => {
       el.removeEventListener("loadedmetadata", onLoadedMetadata);
-      el.removeEventListener("play", onPlay);
+      el.removeEventListener("play", onPlayEvent);
       el.removeEventListener("pause", onPause);
       el.removeEventListener("ended", onVideoEnded);
       window.removeEventListener("beforeunload", onBeforeUnload);
       stopSaveInterval();
     };
-  }, [video.id, initialPosition, onEnded]);
+  }, [video.id, initialPosition, onEnded, onPlay]);
 
   if (playerError) {
     return (
@@ -173,22 +190,13 @@ export function VideoPlayer({
           &#9888; This file may not be supported by your browser.
         </p>
         <div className="player-error-details">
-          <p>
-            <strong>Container:</strong> {video.extension.toUpperCase()}
-          </p>
-          <p>
-            <strong>Video codec:</strong> {video.video_codec || "Unknown"}
-          </p>
-          <p>
-            <strong>Audio codec:</strong> {video.audio_codec || "Unknown"}
-          </p>
+          <p><strong>Container:</strong> {video.extension.toUpperCase()}</p>
+          <p><strong>Video codec:</strong> {video.video_codec || "Unknown"}</p>
+          <p><strong>Audio codec:</strong> {video.audio_codec || "Unknown"}</p>
           {video.compatibility_status && (
             <p>
               <strong>Compatibility:</strong>{" "}
-              <CompatibilityBadge
-                status={video.compatibility_status}
-                reason={video.compatibility_reason}
-              />
+              <CompatibilityBadge status={video.compatibility_status} reason={video.compatibility_reason} />
             </p>
           )}
           {video.compatibility_reason && (
