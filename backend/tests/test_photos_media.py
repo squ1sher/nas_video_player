@@ -210,3 +210,69 @@ def test_media_api_returns_photo_video_and_all(tmp_path: Path) -> None:
     types = {item["type"] for item in all_resp.json()["items"]}
     assert types == {"photo", "video"}
 
+
+def test_media_api_all_includes_tagged_videos(tmp_path: Path) -> None:
+    setup_test_db(tmp_path)
+    client = make_client(tmp_path)
+
+    from app.database import SessionLocal
+    from app.models import Photo, Tag, Video, VideoTag
+
+    db = SessionLocal()
+    try:
+        video = Video(
+            title="tagged",
+            filename="tagged.mp4",
+            relative_path="tagged.mp4",
+            absolute_path=str(tmp_path / "videos" / "tagged.mp4"),
+            extension=".mp4",
+            size=321,
+            modified_ts=datetime.now(timezone.utc).timestamp(),
+            folder_path="",
+            media_status="detected_video",
+            probe_status="success",
+            compatibility_status="direct_play",
+            compatibility_reason="ok",
+            indexed_at=datetime.now(timezone.utc),
+        )
+        photo = Photo(
+            media_source_id=None,
+            relative_path="p2.jpg",
+            internal_path=str(tmp_path / "videos" / "p2.jpg"),
+            display_path="/volume1/p2.jpg",
+            filename="p2.jpg",
+            extension=".jpg",
+            file_size=654,
+            captured_at=datetime.now(timezone.utc),
+            date_source="file_modified",
+            raw_format=False,
+            scan_status="indexed",
+            thumbnail_status="pending",
+        )
+        tag = Tag(name="Travel", normalized_name="travel", path="Travel", depth=0, color=None)
+
+        db.add_all([video, photo, tag])
+        db.flush()
+        db.add(VideoTag(video_id=video.id, tag_id=tag.id))
+        db.commit()
+        tag_id = tag.id
+    finally:
+        db.close()
+
+    response = client.get("/api/media?type=all")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["total"] == 2
+    video_items = [item for item in payload["items"] if item["type"] == "video"]
+    assert len(video_items) == 1
+    assert video_items[0]["tags"] == [
+        {
+            "id": tag_id,
+            "name": "Travel",
+            "path": "Travel",
+            "color": None,
+        }
+    ]
+
+

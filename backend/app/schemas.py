@@ -802,7 +802,7 @@ class MediaItemOut(BaseModel):
     media_source_id: int | None = None
     media_source_name: str | None = None
     folder_path: str | None = None
-    tags: list[TagOut] = Field(default_factory=list)
+    tags: list[VideoTagLiteOut] = Field(default_factory=list)
 
 
 class MediaListQueryOut(BaseModel):
