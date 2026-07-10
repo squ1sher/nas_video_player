@@ -910,24 +910,8 @@ export function LibraryPage() {
                         {group.items.map((item) => {
                           const itemKey = getMediaItemKey(item);
                           const isSelected = selectionMode && selectedMediaKeys.has(itemKey);
-                          return (
-                            <button
-                              key={`${item.type}-${item.id}`}
-                              type="button"
-                              className={`video-card compact${selectionMode ? " video-card-selection-mode" : ""}${isSelected ? " video-card-selected" : ""}`}
-                              onClick={() => {
-                                if (selectionMode) {
-                                  toggleMediaItem(itemKey);
-                                } else {
-                                  navigate(
-                                    item.type === "video"
-                                      ? `/watch/${item.id}`
-                                      : `/photo/${item.id}`
-                                  );
-                                }
-                              }}
-                              title={item.display_title}
-                            >
+                          const itemContent = (
+                            <>
                               <div style={{ position: "relative" }}>
                                 {item.thumbnail_url ? (
                                   <img
@@ -935,10 +919,31 @@ export function LibraryPage() {
                                     alt={item.display_title}
                                     className="thumb"
                                     loading="lazy"
+                                    onError={(e) => {
+                                      e.currentTarget.style.visibility = "hidden";
+                                    }}
                                   />
                                 ) : (
                                   <div className="thumb-fallback">No thumbnail</div>
                                 )}
+                                {item.raw_format ? (
+                                  <span
+                                    style={{
+                                      position: "absolute",
+                                      top: 6,
+                                      left: 6,
+                                      background: "rgba(0,0,0,0.7)",
+                                      color: "#fff",
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      padding: "2px 6px",
+                                      borderRadius: 4,
+                                      letterSpacing: 0.5,
+                                    }}
+                                  >
+                                    RAW
+                                  </span>
+                                ) : null}
                                 {selectionMode ? (
                                   <label
                                     className="video-select-checkbox"
@@ -964,7 +969,42 @@ export function LibraryPage() {
                                   <span>{item.extension}</span>
                                 </div>
                               </div>
-                            </button>
+                            </>
+                          );
+
+                          return (
+                            selectionMode ? (
+                              <button
+                                key={`${item.type}-${item.id}`}
+                                type="button"
+                                className={`video-card compact${selectionMode ? " video-card-selection-mode" : ""}${isSelected ? " video-card-selected" : ""}`}
+                                onClick={() => toggleMediaItem(itemKey)}
+                                title={item.display_title}
+                              >
+                                {itemContent}
+                              </button>
+                            ) : item.type === "video" ? (
+                              <button
+                                key={`${item.type}-${item.id}`}
+                                type="button"
+                                className="video-card compact"
+                                onClick={() => navigate(`/watch/${item.id}`)}
+                                title={item.display_title}
+                              >
+                                {itemContent}
+                              </button>
+                            ) : (
+                              <a
+                                key={`${item.type}-${item.id}`}
+                                className="video-card compact"
+                                href={`/photo/${item.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={item.display_title}
+                              >
+                                {itemContent}
+                              </a>
+                            )
                           );
                         })}
                       </div>

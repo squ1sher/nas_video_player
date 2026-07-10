@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -99,9 +100,10 @@ def update_progress(
     completed = percent >= COMPLETED_THRESHOLD
     now = datetime.now(timezone.utc)
 
-    progress = db.query(WatchProgress).filter(WatchProgress.video_id == video_id).first()
-    if progress is None:
-        progress = WatchProgress(
+    # Atomic upsert avoids race conditions between parallel player updates.
+    db.execute(
+        sqlite_insert(WatchProgress)
+        .values(
             video_id=video_id,
             position_seconds=position,
             duration_seconds=duration,
@@ -109,14 +111,20 @@ def update_progress(
             completed=completed,
             last_watched_at=now,
         )
-        db.add(progress)
-    else:
-        progress.position_seconds = position
-        progress.duration_seconds = duration
-        progress.percent_watched = percent
-        progress.completed = completed
-        progress.last_watched_at = now
-
+        .on_conflict_do_update(
+            index_elements=[WatchProgress.video_id],
+            set_={
+                "position_seconds": position,
+                "duration_seconds": duration,
+                "percent_watched": percent,
+                "completed": completed,
+                "last_watched_at": now,
+            },
+        )
+    )
     db.commit()
+    progress = db.query(WatchProgress).filter(WatchProgress.video_id == video_id).first()
+    if progress is None:
+        raise HTTPException(status_code=500, detail="Failed to persist watch progress")
     db.refresh(progress)
     return _progress_to_schema(progress)

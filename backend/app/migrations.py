@@ -651,6 +651,11 @@ def run_migrations(engine: Engine) -> None:
                     focal_length VARCHAR(32) NULL,
                     thumbnail_path VARCHAR(1024) NULL,
                     preview_path VARCHAR(1024) NULL,
+                    preview_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    preview_error TEXT NULL,
+                    prepare_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    prepare_error TEXT NULL,
+                    prepared_at DATETIME NULL,
                     media_identity VARCHAR(255) NULL UNIQUE,
                     scan_status VARCHAR(32) NOT NULL DEFAULT 'pending',
                     thumbnail_status VARCHAR(32) NOT NULL DEFAULT 'pending',
@@ -672,6 +677,46 @@ def run_migrations(engine: Engine) -> None:
     _create_index_if_missing(engine, "ix_photos_media_identity", "photos", "media_identity")
     _create_index_if_missing(engine, "ix_photos_scan_status", "photos", "scan_status")
     _create_index_if_missing(engine, "ix_photos_thumbnail_status", "photos", "thumbnail_status")
+
+    photo_prepare_migrations = [
+        ("preview_status", "VARCHAR(32) NOT NULL DEFAULT 'pending'"),
+        ("preview_error", "TEXT NULL"),
+        ("prepare_status", "VARCHAR(32) NOT NULL DEFAULT 'pending'"),
+        ("prepare_error", "TEXT NULL"),
+        ("prepared_at", "DATETIME NULL"),
+    ]
+    for col, col_def in photo_prepare_migrations:
+        _add_column_if_missing(engine, "photos", col, col_def)
+    _create_index_if_missing(engine, "ix_photos_preview_status", "photos", "preview_status")
+    _create_index_if_missing(engine, "ix_photos_prepare_status", "photos", "prepare_status")
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS photo_prepare_jobs (
+                    id INTEGER PRIMARY KEY,
+                    status VARCHAR(32) NOT NULL DEFAULT 'queued',
+                    mode VARCHAR(32) NOT NULL DEFAULT 'missing',
+                    total INTEGER NOT NULL DEFAULT 0,
+                    processed INTEGER NOT NULL DEFAULT 0,
+                    succeeded INTEGER NOT NULL DEFAULT 0,
+                    failed INTEGER NOT NULL DEFAULT 0,
+                    skipped INTEGER NOT NULL DEFAULT 0,
+                    current_photo_id INTEGER NULL REFERENCES photos(id) ON DELETE SET NULL,
+                    current_path VARCHAR(1024) NULL,
+                    started_at DATETIME NULL,
+                    finished_at DATETIME NULL,
+                    error TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+    _create_index_if_missing(engine, "ix_photo_prepare_jobs_status", "photo_prepare_jobs", "status")
+    _create_index_if_missing(engine, "ix_photo_prepare_jobs_mode", "photo_prepare_jobs", "mode")
+    _create_index_if_missing(engine, "ix_photo_prepare_jobs_current_photo_id", "photo_prepare_jobs", "current_photo_id")
 
     # ── photo_tags table ───────────────────────────────────────────────────────
     with engine.begin() as conn:

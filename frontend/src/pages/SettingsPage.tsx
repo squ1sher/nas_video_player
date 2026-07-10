@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import {
   browseMediaSources,
   cancelHlsBatch,
+  cancelPhotoPrepare,
   clearMediaProfilePlaybackStatus,
   createLibraryHlsBatch,
   createMediaSource,
@@ -17,6 +18,8 @@ import {
   getHlsGlobalStatus,
   getMediaProfiles,
   getMediaSources,
+  getPhotoPrepareStatus,
+  getPhotoPrepareSummary,
   getScheduledJobs,
   repairStaleHls,
   runScheduledJobNow,
@@ -24,6 +27,7 @@ import {
   scanMediaSource,
   setMediaProfilePlaybackStatus,
   startDuplicateScan,
+  startPhotoPrepareMissing,
   updateScheduledJob,
   updateMediaSource,
   validateMediaSourcePath,
@@ -41,6 +45,8 @@ import type {
   MediaProfileItem,
   MediaSourceBrowseItem,
   PathValidationResult,
+  PhotoPrepareStatus,
+  PhotoPrepareSummary,
   ScheduledJob,
 } from "../types/video";
 import { TagsManagementSection } from "../components/tags/TagsManagementSection";
@@ -140,6 +146,13 @@ export function SettingsPage() {
   const [hlsRepairBusy, setHlsRepairBusy] = useState(false);
   const [hlsMsg, setHlsMsg] = useState<string | null>(null);
 
+  // ── Photo preparation ───────────────────────────────────────────────────
+  const [photoPrepareStatus, setPhotoPrepareStatus] = useState<PhotoPrepareStatus | null>(null);
+  const [photoPrepareSummary, setPhotoPrepareSummary] = useState<PhotoPrepareSummary | null>(null);
+  const [photoPrepareBusy, setPhotoPrepareBusy] = useState(false);
+  const [photoPrepareCancelBusy, setPhotoPrepareCancelBusy] = useState(false);
+  const [photoPrepareMsg, setPhotoPrepareMsg] = useState<string | null>(null);
+
   // ── Scheduler ───────────────────────────────────────────────────────────
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
   const [schedulerBusyKey, setSchedulerBusyKey] = useState<string | null>(null);
@@ -180,6 +193,15 @@ export function SettingsPage() {
     } else {
       setHlsBatch(null);
     }
+  };
+
+  const loadPhotoPrepareState = async () => {
+    const [status, summary] = await Promise.all([
+      getPhotoPrepareStatus(),
+      getPhotoPrepareSummary(),
+    ]);
+    setPhotoPrepareStatus(status);
+    setPhotoPrepareSummary(summary);
   };
 
   const loadDuplicates = async () => {
@@ -223,6 +245,7 @@ export function SettingsPage() {
       await Promise.all([
         loadMediaSources(),
         loadHlsState(),
+        loadPhotoPrepareState(),
         loadDuplicates(),
         loadCompatibility(),
         loadScheduler(),
@@ -239,6 +262,14 @@ export function SettingsPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (photoPrepareStatus?.status !== "queued" && photoPrepareStatus?.status !== "running") return;
+    const id = setInterval(() => {
+      void loadPhotoPrepareState();
+    }, 2500);
+    return () => clearInterval(id);
+  }, [photoPrepareStatus?.status]);
 
   // ── Browse helpers ──────────────────────────────────────────────────────
 
@@ -447,8 +478,45 @@ export function SettingsPage() {
     }
   };
 
+  const handleStartPhotoPrepareMissing = async (includeFailed = false) => {
+    setPhotoPrepareBusy(true);
+    setPhotoPrepareMsg(null);
+    try {
+      const response = await startPhotoPrepareMissing({
+        include_failed: includeFailed,
+        include_raw_placeholders: true,
+      });
+      if (response.status === "started") {
+        setPhotoPrepareMsg("Photo preparation started.");
+      } else {
+        setPhotoPrepareMsg(response.reason ?? "Photo preparation skipped.");
+      }
+      await loadPhotoPrepareState();
+    } catch (e) {
+      setPhotoPrepareMsg(String(e));
+    } finally {
+      setPhotoPrepareBusy(false);
+    }
+  };
+
+  const handleCancelPhotoPrepare = async () => {
+    setPhotoPrepareCancelBusy(true);
+    try {
+      const response = await cancelPhotoPrepare();
+      setPhotoPrepareMsg(response.reason ?? "Photo preparation cancellation requested.");
+      await loadPhotoPrepareState();
+    } catch (e) {
+      setPhotoPrepareMsg(String(e));
+    } finally {
+      setPhotoPrepareCancelBusy(false);
+    }
+  };
+
   const libraryScanJob = scheduledJobs.find((job) => job.job_type === "library_scan") ?? null;
   const hlsMissingJob = scheduledJobs.find((job) => job.job_type === "hls_prepare_missing") ?? null;
+  const photoPrepareJob = scheduledJobs.find((job) => job.job_type === "photo_prepare_missing") ?? null;
+  const photoPrepareRunning = photoPrepareStatus?.status === "running" || photoPrepareStatus?.status === "queued";
+  const scanRunning = scanAllBusy || scanning !== null;
 
   const handleSaveScheduledJob = async (job: ScheduledJob, patch: Partial<Pick<ScheduledJob, "enabled" | "time_of_day">>) => {
     const busyKey = `save-${job.id}`;
@@ -480,7 +548,7 @@ export function SettingsPage() {
       } else {
         setSchedulerMsg(`${job.name}: ${result.reason ?? "skipped"}`);
       }
-      await Promise.all([loadScheduler(), loadHlsState()]);
+      await Promise.all([loadScheduler(), loadHlsState(), loadPhotoPrepareState()]);
     } catch (e) {
       setSchedulerMsg(String(e));
     } finally {
@@ -630,7 +698,7 @@ export function SettingsPage() {
             </p>
           </div>
           <div className="settings-inline-actions">
-            <button className="btn-secondary" onClick={() => void handleScanAll()} disabled={scanAllBusy}>
+            <button className="btn-secondary" onClick={() => void handleScanAll()} disabled={scanAllBusy || photoPrepareRunning}>
               {scanAllBusy ? "Starting..." : "Scan Library"}
             </button>
             <button className="btn-primary" onClick={openAdd}>+ Add Source</button>
@@ -686,7 +754,7 @@ export function SettingsPage() {
                       <button
                         className="btn-sm btn-scan"
                         onClick={() => void handleScanSource(s)}
-                        disabled={scanning === s.id || !s.enabled}
+                        disabled={scanning === s.id || !s.enabled || photoPrepareRunning}
                       >
                         {scanning === s.id ? "..." : "Scan"}
                       </button>
@@ -746,6 +814,72 @@ export function SettingsPage() {
         )}
       </section>
 
+      {/* Photo Preparation */}
+      <section className="settings-section" id="photo-preparation">
+        <div className="settings-section-header">
+          <div>
+            <h2>Photo Preparation</h2>
+            <p className="settings-section-desc">
+              Generate grid thumbnails and viewer previews for photos, including RAW/ARW derived JPEG previews when possible.
+            </p>
+          </div>
+          <div className="settings-inline-actions">
+            <button className="btn-secondary" onClick={() => void loadPhotoPrepareState()}>Refresh</button>
+            <button
+              className="btn-secondary"
+              onClick={() => void handleStartPhotoPrepareMissing(true)}
+              disabled={photoPrepareBusy || photoPrepareRunning || scanRunning}
+            >
+              Retry failed
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => void handleStartPhotoPrepareMissing(false)}
+              disabled={photoPrepareBusy || photoPrepareRunning || scanRunning}
+            >
+              {photoPrepareBusy ? "Starting..." : "Prepare missing"}
+            </button>
+          </div>
+        </div>
+
+        {photoPrepareMsg && <div className="settings-notice">{photoPrepareMsg}</div>}
+
+        <div className="settings-kv-grid">
+          <div><strong>Total photos:</strong> {photoPrepareSummary?.total_photos ?? 0}</div>
+          <div><strong>Ready:</strong> {photoPrepareSummary?.ready ?? 0}</div>
+          <div><strong>Missing thumbnails:</strong> {photoPrepareSummary?.missing_thumbnail ?? 0}</div>
+          <div><strong>Missing previews:</strong> {photoPrepareSummary?.missing_preview ?? 0}</div>
+          <div><strong>Failed:</strong> {photoPrepareSummary?.failed ?? 0}</div>
+          <div><strong>RAW total:</strong> {photoPrepareSummary?.raw_total ?? 0}</div>
+          <div><strong>RAW ready:</strong> {photoPrepareSummary?.raw_ready ?? 0}</div>
+          <div><strong>RAW placeholders:</strong> {photoPrepareSummary?.raw_placeholder ?? 0}</div>
+        </div>
+
+        {photoPrepareStatus && photoPrepareStatus.status !== "idle" ? (
+          <div className="settings-notice" style={{ display: "block" }}>
+            <div className="settings-section-header" style={{ marginBottom: 8 }}>
+              <div>
+                <strong>Status:</strong> {photoPrepareStatus.status}
+                {photoPrepareStatus.mode ? ` · mode: ${photoPrepareStatus.mode}` : ""}
+              </div>
+              {(photoPrepareStatus.status === "queued" || photoPrepareStatus.status === "running") ? (
+                <button className="btn-danger btn-sm" onClick={() => void handleCancelPhotoPrepare()} disabled={photoPrepareCancelBusy}>
+                  {photoPrepareCancelBusy ? "Cancelling..." : "Cancel"}
+                </button>
+              ) : null}
+            </div>
+            <div className="settings-kv-grid">
+              <div><strong>Processed:</strong> {photoPrepareStatus.processed} / {photoPrepareStatus.total}</div>
+              <div><strong>Succeeded:</strong> {photoPrepareStatus.succeeded}</div>
+              <div><strong>Failed:</strong> {photoPrepareStatus.failed}</div>
+              <div><strong>Skipped:</strong> {photoPrepareStatus.skipped}</div>
+              <div><strong>Current:</strong> {photoPrepareStatus.current_path ?? "—"}</div>
+              <div><strong>Error:</strong> {photoPrepareStatus.error ?? "—"}</div>
+            </div>
+          </div>
+        ) : null}
+      </section>
+
       {/* Scheduler */}
       <section className="settings-section" id="scheduler">
         <div className="settings-section-header">
@@ -760,7 +894,7 @@ export function SettingsPage() {
 
         {schedulerMsg && <div className="settings-notice">{schedulerMsg}</div>}
 
-        {[libraryScanJob, hlsMissingJob].filter(Boolean).map((job) => {
+        {[libraryScanJob, hlsMissingJob, photoPrepareJob].filter(Boolean).map((job) => {
           const current = job as ScheduledJob;
           const saveBusy = schedulerBusyKey === `save-${current.id}`;
           const runBusy = schedulerBusyKey === `run-${current.id}`;
@@ -772,6 +906,11 @@ export function SettingsPage() {
                   {current.job_type === "hls_prepare_missing" ? (
                     <p className="settings-section-desc" style={{ margin: "4px 0 0" }}>
                       Uses the 480p profile. Existing HLS is skipped.
+                    </p>
+                  ) : null}
+                  {current.job_type === "photo_prepare_missing" ? (
+                    <p className="settings-section-desc" style={{ margin: "4px 0 0" }}>
+                      Generates missing photo thumbnails/previews. RAW placeholders are retried.
                     </p>
                   ) : null}
                 </div>
@@ -1188,4 +1327,3 @@ export function SettingsPage() {
     </div>
   );
 }
-

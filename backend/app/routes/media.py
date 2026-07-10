@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import LibraryRoot, Photo, Video
 from app.schemas import MediaItemOut, MediaListQueryOut
 from app.services.tag_service import get_video_tags_map
+from app.utils.files import IMAGE_EXTENSIONS
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 
@@ -46,6 +47,7 @@ def list_media(
 
     if type in {"video", "all"}:
         video_query = db.query(Video)
+        video_query = video_query.filter(~Video.extension.in_(sorted(IMAGE_EXTENSIONS)))
         video_query = video_query.filter(
             or_(
                 Video.availability_status.is_(None),
@@ -126,5 +128,4 @@ def list_media(
         )
 
     return MediaListQueryOut(items=items, total=len(items))
-
 

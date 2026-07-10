@@ -29,6 +29,7 @@ from app.routes.tags import router as tags_router
 from app.routes.videos import router as videos_router
 from app.scanner import initialize_library_roots, recover_scan_runtime_state
 from app.services.hls_service import ensure_batch_worker_started, recover_hls_runtime_state
+from app.services.photo_prepare_service import recover_photo_prepare_runtime_state
 from app.services.scheduler_service import initialize_default_jobs, recalculate_next_runs, start_scheduler
 from app.utils.logging_config import configure_logging
 
@@ -71,6 +72,7 @@ def on_startup() -> None:
         initialize_library_roots(db, settings)
         initialize_default_jobs(db)
         recalculate_next_runs(db)
+        recover_photo_prepare_runtime_state(db)
     finally:
         db.close()
     recover_scan_runtime_state()
@@ -79,6 +81,22 @@ def on_startup() -> None:
     start_scheduler(settings)
     logger.info("Application started")
     logger.info("Video library path: %s", settings.video_library_path)
+
+    # Report RAW (ARW/CR2/NEF) preview support status.
+    from app.services import photo_service as _photo_service
+
+    if getattr(_photo_service, "rawpy", None) is None:
+        logger.warning(
+            "RAW preview support unavailable: rawpy is not installed. "
+            "ARW/RAW files will be indexed but shown with a placeholder."
+        )
+    else:
+        logger.info("RAW preview support enabled (rawpy available)")
+    if getattr(_photo_service, "Image", None) is None:
+        logger.warning(
+            "Image processing unavailable: Pillow is not functional. "
+            "Photo thumbnails/previews will fall back to placeholders."
+        )
 
 
 static_dir = Path(__file__).parent / "static"

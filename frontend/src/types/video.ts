@@ -529,7 +529,7 @@ export type PlaybackSource = {
 
 export type ScheduledJob = {
   id: number;
-  job_type: "library_scan" | "hls_prepare_missing";
+  job_type: "library_scan" | "hls_prepare_missing" | "photo_prepare_missing";
   name: string;
   enabled: boolean;
   schedule_type: "daily";
@@ -637,6 +637,11 @@ export type PhotoDetail = {
   scan_status: string;
   thumbnail_status: string;
   thumbnail_error: string | null;
+  preview_status: string;
+  preview_error: string | null;
+  prepare_status: string;
+  prepare_error: string | null;
+  prepared_at: string | null;
   scan_error: string | null;
   created_at: string;
   updated_at: string;
@@ -664,6 +669,38 @@ export type UnifiedMediaItem = {
 export type UnifiedMediaList = {
   items: UnifiedMediaItem[];
   total: number;
+};
+
+export type PhotoPrepareStatus = {
+  status: "idle" | "queued" | "running" | "completed" | "failed" | "cancelled" | "skipped" | string;
+  mode: string | null;
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  current_photo_id: number | null;
+  current_path: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+};
+
+export type PhotoPrepareSummary = {
+  total_photos: number;
+  ready: number;
+  missing_thumbnail: number;
+  missing_preview: number;
+  failed: number;
+  raw_total: number;
+  raw_ready: number;
+  raw_placeholder: number;
+};
+
+export type PhotoPrepareStartResponse = {
+  status: "started" | "skipped" | "cancelled" | string;
+  job_id: number | null;
+  reason: string | null;
 };
 
 // ── Playlist playback context ──────────────────────────────────────────────

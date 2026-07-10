@@ -156,6 +156,36 @@ def test_scan_with_no_sources_returns_no_sources(tmp_path: Path) -> None:
     assert "media sources" in data["message"].lower()
 
 
+def test_scan_skips_when_photo_prepare_running(tmp_path: Path) -> None:
+    """POST /api/scan rejects starting while photo preparation is active."""
+    setup_test_db(tmp_path)
+    client = make_client(tmp_path)
+
+    from app.database import SessionLocal
+    from app.models import PhotoPrepareJob
+    from app.scan_status import _lock, _state
+
+    with _lock:
+        _state.status = "idle"
+        _state.cancellation_requested = False
+        _state.current_file = None
+        _state.current_root = None
+        _state.message = None
+
+    db = SessionLocal()
+    try:
+        db.add(PhotoPrepareJob(status="running", mode="missing", total=1))
+        db.commit()
+    finally:
+        db.close()
+
+    resp = client.post("/api/scan")
+    assert resp.status_code == 409
+    data = resp.json()
+    assert data["detail"]["status"] == "photo_prepare_running"
+    assert "photo preparation" in data["detail"]["message"].lower()
+
+
 def test_scan_with_no_sources_never_scans_media_root(tmp_path: Path, monkeypatch) -> None:
     """Scanner never processes files when no sources are configured."""
     setup_test_db(tmp_path)
@@ -841,4 +871,3 @@ def _make_settings(tmp_path: Path, *, excluded: str = "", allowed_bases: str = "
     from app.config import get_settings
     get_settings.cache_clear()
     return get_settings()
-

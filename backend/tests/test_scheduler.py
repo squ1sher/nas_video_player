@@ -80,7 +80,7 @@ def test_scheduler_default_jobs_created_disabled(tmp_path: Path) -> None:
     response = client.get("/api/scheduler/jobs")
     assert response.status_code == 200
     jobs = response.json()
-    assert {job["job_type"] for job in jobs} == {"library_scan", "hls_prepare_missing"}
+    assert {job["job_type"] for job in jobs} == {"library_scan", "hls_prepare_missing", "photo_prepare_missing"}
     assert all(job["enabled"] is False for job in jobs)
 
 
@@ -123,6 +123,30 @@ def test_scheduler_run_now_library_scan_skips_when_no_sources(tmp_path: Path) ->
     payload = response.json()
     assert payload["status"] == "skipped"
     assert "no media sources" in (payload.get("reason") or "").lower()
+
+
+def test_scheduler_run_now_library_scan_skips_when_photo_prepare_running(tmp_path: Path) -> None:
+    _reset_scan_state()
+    client = make_client(tmp_path)
+
+    from app.database import SessionLocal
+    from app.models import PhotoPrepareJob
+
+    db = SessionLocal()
+    try:
+        db.add(PhotoPrepareJob(status="running", mode="missing", total=1))
+        db.commit()
+    finally:
+        db.close()
+
+    jobs = client.get("/api/scheduler/jobs").json()
+    library_job = next(job for job in jobs if job["job_type"] == "library_scan")
+
+    response = client.post(f"/api/scheduler/jobs/{library_job['id']}/run-now")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "skipped"
+    assert "photo preparation" in (payload.get("reason") or "").lower()
 
 
 def test_scheduler_run_now_hls_prepare_missing_starts_batch(tmp_path: Path, monkeypatch) -> None:
@@ -190,6 +214,47 @@ def test_scheduler_run_now_hls_prepare_missing_skips_when_hls_running(tmp_path: 
     assert "already running" in (payload.get("reason") or "").lower()
 
 
+def test_scheduler_run_now_photo_prepare_missing_starts_job(tmp_path: Path) -> None:
+    _reset_scan_state()
+    client = make_client(tmp_path)
+
+    from app.database import SessionLocal
+    from app.models import Photo
+
+    source = tmp_path / "videos" / "photo.jpg"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"photo")
+
+    db = SessionLocal()
+    try:
+        db.add(
+            Photo(
+                media_source_id=None,
+                relative_path="photo.jpg",
+                internal_path=str(source),
+                display_path="/volume1/photo.jpg",
+                filename="photo.jpg",
+                extension=".jpg",
+                file_size=source.stat().st_size,
+                scan_status="indexed",
+                thumbnail_status="pending",
+                preview_status="pending",
+                prepare_status="pending",
+                raw_format=False,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    jobs = client.get("/api/scheduler/jobs").json()
+    photo_job = next(job for job in jobs if job["job_type"] == "photo_prepare_missing")
+
+    response = client.post(f"/api/scheduler/jobs/{photo_job['id']}/run-now")
+    assert response.status_code == 200
+    assert response.json()["status"] == "started"
+
+
 def test_due_scheduler_job_executes_and_updates_status(tmp_path: Path, monkeypatch) -> None:
     _reset_scan_state()
     client = make_client(tmp_path)
@@ -226,6 +291,5 @@ def test_due_scheduler_job_executes_and_updates_status(tmp_path: Path, monkeypat
     assert updated.last_run_at is not None
     assert updated.next_run_at is not None
     db.close()
-
 
 

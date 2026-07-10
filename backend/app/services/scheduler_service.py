@@ -12,16 +12,19 @@ from app.models import LibraryRoot, ScheduledJob
 from app.scan_status import get_scan_state
 from app.scanner import scan_video_library_background
 from app.services.hls_service import DEFAULT_GENERATION_QUALITIES, create_library_batch, get_global_hls_status
+from app.services.photo_prepare_service import get_prepare_status, start_prepare_missing
 
 JOB_TYPE_LIBRARY_SCAN = "library_scan"
 JOB_TYPE_HLS_PREPARE_MISSING = "hls_prepare_missing"
-ALLOWED_JOB_TYPES = {JOB_TYPE_LIBRARY_SCAN, JOB_TYPE_HLS_PREPARE_MISSING}
+JOB_TYPE_PHOTO_PREPARE_MISSING = "photo_prepare_missing"
+ALLOWED_JOB_TYPES = {JOB_TYPE_LIBRARY_SCAN, JOB_TYPE_HLS_PREPARE_MISSING, JOB_TYPE_PHOTO_PREPARE_MISSING}
 ALLOWED_SCHEDULE_TYPES = {"daily"}
 SCHEDULER_POLL_SECONDS = 60
 
 _DEFAULT_JOBS: tuple[tuple[str, str, str], ...] = (
     (JOB_TYPE_LIBRARY_SCAN, "Library scan", "02:00"),
     (JOB_TYPE_HLS_PREPARE_MISSING, "Prepare HLS for all missing", "03:00"),
+    (JOB_TYPE_PHOTO_PREPARE_MISSING, "Prepare photo thumbnails/previews", "04:00"),
 )
 
 _scheduler_lock = threading.Lock()
@@ -156,6 +159,10 @@ def _try_start_library_scan(db: Session, settings: Settings) -> tuple[str, str |
     if state.status in {"running", "cancelling"}:
         return "skipped", "Library scan is already running."
 
+    photo_prepare_status = get_prepare_status(db)
+    if photo_prepare_status.get("status") in {"queued", "running"}:
+        return "skipped", "Photo preparation is already running."
+
     if _enabled_sources_count(db) == 0:
         return "skipped", "No media sources configured."
 
@@ -183,6 +190,21 @@ def _try_start_hls_prepare_missing(db: Session, settings: Settings) -> tuple[str
     return "skipped", str(payload.get("message") or "No videos queued for HLS.")
 
 
+def _try_start_photo_prepare_missing(db: Session, settings: Settings) -> tuple[str, str | None]:
+    scan_state = get_scan_state()
+    if scan_state.status in {"running", "cancelling"}:
+        return "skipped", "Library scan is running."
+
+    status = get_prepare_status(db)
+    if status.get("status") in {"queued", "running"}:
+        return "skipped", "Photo preparation is already running."
+
+    payload = start_prepare_missing(db, settings, include_failed=False, include_raw_placeholders=True)
+    if payload["status"] == "started":
+        return "started", None
+    return "skipped", str(payload.get("reason") or "No photos need preparation.")
+
+
 def _execute_job(
     db: Session,
     settings: Settings,
@@ -197,6 +219,8 @@ def _execute_job(
         return _try_start_library_scan(db, settings)
     if job.job_type == JOB_TYPE_HLS_PREPARE_MISSING:
         return _try_start_hls_prepare_missing(db, settings)
+    if job.job_type == JOB_TYPE_PHOTO_PREPARE_MISSING:
+        return _try_start_photo_prepare_missing(db, settings)
     return "skipped", "Unsupported job type."
 
 
@@ -262,5 +286,4 @@ def start_scheduler(settings: Settings) -> None:
         worker = threading.Thread(target=_scheduler_loop, args=(settings,), daemon=True)
         worker.start()
         _scheduler_started = True
-
 

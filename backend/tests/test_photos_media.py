@@ -23,7 +23,7 @@ def _add_root(db, path: Path, *, media_type: str) -> int:
     return root.id
 
 
-def test_photo_source_scans_jpg_and_generates_thumbnail(tmp_path: Path, monkeypatch) -> None:
+def test_photo_source_scans_jpg_and_marks_preparation_pending(tmp_path: Path, monkeypatch) -> None:
     setup_test_db(tmp_path)
     root = tmp_path / "videos" / "photos"
     root.mkdir(parents=True)
@@ -45,20 +45,6 @@ def test_photo_source_scans_jpg_and_generates_thumbnail(tmp_path: Path, monkeypa
         ),
     )
 
-    class _ThumbResult:
-        def __init__(self, path: Path | None, error: str | None = None) -> None:
-            self.path = path
-            self.error = error
-
-    def _fake_thumb(_photo_path: Path, thumbnails_dir: Path, photo_id: int) -> _ThumbResult:
-        target = thumbnails_dir / "photos"
-        target.mkdir(parents=True, exist_ok=True)
-        out = target / f"{photo_id}.jpg"
-        out.write_bytes(b"thumb")
-        return _ThumbResult(path=out)
-
-    monkeypatch.setattr("app.scanner.generate_photo_thumbnail", _fake_thumb)
-
     db = SessionLocal()
     try:
         _add_root(db, root, media_type="photo")
@@ -70,7 +56,9 @@ def test_photo_source_scans_jpg_and_generates_thumbnail(tmp_path: Path, monkeypa
     assert result.added == 1
     assert len(photos) == 1
     assert photos[0].extension == ".jpg"
-    assert photos[0].thumbnail_status == "generated"
+    assert photos[0].thumbnail_status == "pending"
+    assert photos[0].preview_status == "pending"
+    assert photos[0].prepare_status == "pending"
 
 
 def test_mixed_source_scans_video_and_photo(tmp_path: Path, monkeypatch) -> None:
@@ -107,11 +95,6 @@ def test_mixed_source_scans_video_and_photo(tmp_path: Path, monkeypatch) -> None
             date_source="file_modified",
         ),
     )
-    monkeypatch.setattr(
-        "app.scanner.generate_photo_thumbnail",
-        lambda *_a, **_k: type("_R", (), {"path": None, "error": "skip"})(),
-    )
-
     from app.config import get_settings
     from app.database import SessionLocal
     from app.models import Photo, Video
@@ -150,7 +133,10 @@ def test_raw_file_indexed_without_thumbnail_crash(tmp_path: Path) -> None:
 
     assert photo is not None
     assert photo.raw_format is True
-    assert photo.thumbnail_status == "skipped"
+    # Scan indexes RAW quickly; preparation is handled by the separate photo preparation service.
+    assert photo.thumbnail_status == "pending"
+    assert photo.preview_status == "pending"
+    assert photo.prepare_status == "pending"
 
 
 def test_media_api_returns_photo_video_and_all(tmp_path: Path) -> None:
@@ -275,4 +261,44 @@ def test_media_api_all_includes_tagged_videos(tmp_path: Path) -> None:
         }
     ]
 
+
+def test_raw_photo_extensions_are_hidden_from_video_endpoints(tmp_path: Path) -> None:
+    setup_test_db(tmp_path)
+    client = make_client(tmp_path)
+
+    from app.database import SessionLocal
+    from app.models import Video
+
+    db = SessionLocal()
+    try:
+        raw_video = Video(
+            title="raw photo",
+            filename="photo.arw",
+            relative_path="photo.arw",
+            absolute_path=str(tmp_path / "videos" / "photo.arw"),
+            extension=".arw",
+            size=1024,
+            modified_ts=datetime.now(timezone.utc).timestamp(),
+            folder_path="",
+            media_status="detected_video",
+            probe_status="success",
+            compatibility_status="may_not_play",
+            compatibility_reason="should not be visible as video",
+            indexed_at=datetime.now(timezone.utc),
+        )
+        db.add(raw_video)
+        db.commit()
+        raw_id = raw_video.id
+    finally:
+        db.close()
+
+    list_resp = client.get("/api/videos")
+    media_resp = client.get("/api/media?type=video")
+    detail_resp = client.get(f"/api/videos/{raw_id}")
+
+    assert list_resp.status_code == 200
+    assert media_resp.status_code == 200
+    assert detail_resp.status_code == 404
+    assert all(item["extension"] != ".arw" for item in list_resp.json())
+    assert all(item["extension"] != ".arw" for item in media_resp.json()["items"])
 

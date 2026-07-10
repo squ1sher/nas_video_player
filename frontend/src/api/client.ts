@@ -41,6 +41,9 @@ import type {
   TagTreePatchResult,
   TagTreeNode,
   PhotoDetail,
+  PhotoPrepareStartResponse,
+  PhotoPrepareStatus,
+  PhotoPrepareSummary,
   UnifiedMediaList,
   VideoDetail,
   VideoListItem,
@@ -125,6 +128,39 @@ export async function fetchVideo(id: string | number): Promise<VideoDetail> {
 
 export async function fetchPhoto(id: string | number): Promise<PhotoDetail> {
   return handleResponse<PhotoDetail>(await fetch(`${API_BASE}/photos/${id}`));
+}
+
+export async function getPhotoPrepareStatus(): Promise<PhotoPrepareStatus> {
+  return handleResponse<PhotoPrepareStatus>(await fetch(`${API_BASE}/photos/prepare/status?t=${Date.now()}`, { cache: "no-store" }));
+}
+
+export async function getPhotoPrepareSummary(): Promise<PhotoPrepareSummary> {
+  return handleResponse<PhotoPrepareSummary>(await fetch(`${API_BASE}/photos/prepare/summary?t=${Date.now()}`, { cache: "no-store" }));
+}
+
+export async function startPhotoPrepareMissing(body: {
+  include_failed?: boolean;
+  include_raw_placeholders?: boolean;
+} = {}): Promise<PhotoPrepareStartResponse> {
+  return handleResponse<PhotoPrepareStartResponse>(
+    await fetch(`${API_BASE}/photos/prepare/missing`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        include_failed: body.include_failed ?? false,
+        include_raw_placeholders: body.include_raw_placeholders ?? true,
+      }),
+    })
+  );
+}
+
+export async function cancelPhotoPrepare(): Promise<PhotoPrepareStartResponse> {
+  return handleResponse<PhotoPrepareStartResponse>(
+    await fetch(`${API_BASE}/photos/prepare/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    })
+  );
 }
 
 export async function fetchMedia(params: {

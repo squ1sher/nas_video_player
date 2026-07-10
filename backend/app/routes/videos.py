@@ -25,7 +25,7 @@ from app.services.playlist_service import remove_video_from_all_playlists
 from app.streaming import RangeError, iter_file_chunks, parse_range_header
 from app.services.tag_service import TagError, assign_video_tags, get_video_tags, get_video_tags_map, remove_video_tag
 from app.thumbnails import generate_thumbnail
-from app.utils.files import guess_mime_type
+from app.utils.files import IMAGE_EXTENSIONS, guess_mime_type, is_photo_extension
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/videos", tags=["videos"])
@@ -160,7 +160,7 @@ def to_detail(
 
 def get_video_or_404(db: Session, video_id: int) -> Video:
     video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
+    if not video or is_photo_extension(video.extension):
         raise HTTPException(status_code=404, detail="Video not found")
     return video
 
@@ -262,6 +262,7 @@ def list_videos(
     db: Session = Depends(get_db),
 ) -> list[VideoListItem]:
     query = db.query(Video)
+    query = query.filter(~Video.extension.in_(sorted(IMAGE_EXTENSIONS)))
     selected_tag_ids = _parse_tag_ids(tag_ids)
     # By default exclude source_removed, source_disabled, deleted from normal library view
     if not show_all and availability_status is None:

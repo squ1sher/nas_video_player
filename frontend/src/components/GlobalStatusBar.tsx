@@ -2,13 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   cancelHlsBatch,
+  cancelPhotoPrepare,
   cancelScan,
   getDuplicateStatus,
   getHlsBatch,
   getHlsGlobalStatus,
+  getPhotoPrepareStatus,
   getScanStatus,
 } from "../api/client";
-import type { DuplicateScanStatus, HlsBatchDetail, HlsGlobalStatus, ScanStatus } from "../types/video";
+import type { DuplicateScanStatus, HlsBatchDetail, HlsGlobalStatus, PhotoPrepareStatus, ScanStatus } from "../types/video";
 
 type ProcessItem = {
   key: string;
@@ -33,23 +35,30 @@ function isHlsActive(hls: HlsGlobalStatus | null, batch: HlsBatchDetail | null):
   return batch.status === "queued" || batch.status === "running";
 }
 
+function isPhotoPrepareActive(status: PhotoPrepareStatus | null): boolean {
+  return status?.status === "queued" || status?.status === "running";
+}
+
 export function GlobalStatusBar() {
   const [scan, setScan] = useState<ScanStatus | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateScanStatus | null>(null);
   const [hls, setHls] = useState<HlsGlobalStatus | null>(null);
   const [hlsBatch, setHlsBatch] = useState<HlsBatchDetail | null>(null);
+  const [photoPrepare, setPhotoPrepare] = useState<PhotoPrepareStatus | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const loadStatuses = async () => {
     try {
-      const [scanStatus, duplicateStatus, hlsStatus] = await Promise.all([
+      const [scanStatus, duplicateStatus, hlsStatus, photoPrepareStatus] = await Promise.all([
         getScanStatus(),
         getDuplicateStatus(),
         getHlsGlobalStatus(),
+        getPhotoPrepareStatus(),
       ]);
       setScan(scanStatus);
       setDuplicate(duplicateStatus);
       setHls(hlsStatus);
+      setPhotoPrepare(photoPrepareStatus);
 
       if (hlsStatus.active_batch_id !== null) {
         const batch = await getHlsBatch(hlsStatus.active_batch_id, { include_items: false });
@@ -67,13 +76,13 @@ export function GlobalStatusBar() {
   }, []);
 
   useEffect(() => {
-    const active = isScanActive(scan) || isDuplicateActive(duplicate) || isHlsActive(hls, hlsBatch);
+    const active = isScanActive(scan) || isDuplicateActive(duplicate) || isHlsActive(hls, hlsBatch) || isPhotoPrepareActive(photoPrepare);
     const ms = active ? 2500 : 10000;
     const id = setInterval(() => {
       void loadStatuses();
     }, ms);
     return () => clearInterval(id);
-  }, [scan, duplicate, hls, hlsBatch]);
+  }, [scan, duplicate, hls, hlsBatch, photoPrepare]);
 
   const items = useMemo<ProcessItem[]>(() => {
     const next: ProcessItem[] = [];
@@ -113,6 +122,22 @@ export function GlobalStatusBar() {
       });
     }
 
+    if (isPhotoPrepareActive(photoPrepare)) {
+      const currentName = photoPrepare?.current_path ? photoPrepare.current_path.split("/").pop() : null;
+      next.push({
+        key: "photo-prepare",
+        title: "Preparing photos",
+        message: `${photoPrepare?.processed ?? 0} / ${photoPrepare?.total ?? 0}${currentName ? ` · ${currentName}` : ""}${
+          photoPrepare && photoPrepare.failed > 0 ? ` · failed ${photoPrepare.failed}` : ""
+        }`,
+        canCancel: true,
+        cancel: async () => {
+          await cancelPhotoPrepare();
+          await loadStatuses();
+        },
+      });
+    }
+
     if (isDuplicateActive(duplicate)) {
       next.push({
         key: "duplicates",
@@ -125,7 +150,7 @@ export function GlobalStatusBar() {
     }
 
     return next;
-  }, [scan, duplicate, hls, hlsBatch]);
+  }, [scan, duplicate, hls, hlsBatch, photoPrepare]);
 
   if (items.length === 0) return null;
 

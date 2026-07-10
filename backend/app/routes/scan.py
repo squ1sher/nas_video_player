@@ -6,6 +6,7 @@ from app.models import LibraryRoot
 from app.scan_status import get_scan_state, request_scan_cancellation
 from app.scanner import scan_video_library_background
 from app.schemas import ScanStartedResponse, ScanStatusOut
+from app.services.photo_prepare_service import get_prepare_status
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api", tags=["scan"])
@@ -55,6 +56,17 @@ def scan_library(
                 "status": "already_running",
                 "message": "Library scan is already running.",
                 "current_status": _scan_state_payload(state),
+            },
+        )
+
+    photo_prepare_status = get_prepare_status(db)
+    if photo_prepare_status.get("status") in {"queued", "running"}:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "photo_prepare_running",
+                "message": "Photo preparation is already running.",
+                "current_status": photo_prepare_status,
             },
         )
 

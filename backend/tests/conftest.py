@@ -2,7 +2,6 @@
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 
@@ -21,11 +20,9 @@ def setup_test_db(tmp_path: Path):
     from app.config import get_settings
     get_settings.cache_clear()
 
-    db_url = f"sqlite:///{data_dir / 'app.db'}"
-    new_engine = create_engine(db_url, connect_args={"check_same_thread": False})
-
     import app.database as db_module
 
+    new_engine = db_module.create_sqlite_engine(data_dir / "app.db")
     db_module.engine = new_engine
     db_module.SessionLocal = sessionmaker(
         bind=new_engine, autocommit=False, autoflush=False, class_=Session

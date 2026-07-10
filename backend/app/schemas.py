@@ -775,6 +775,11 @@ class PhotoOut(BaseModel):
     scan_status: str = "pending"
     thumbnail_status: str = "pending"
     thumbnail_error: str | None = None
+    preview_status: str = "pending"
+    preview_error: str | None = None
+    prepare_status: str = "pending"
+    prepare_error: str | None = None
+    prepared_at: datetime | None = None
     scan_error: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -784,6 +789,48 @@ class PhotoOut(BaseModel):
 
 class PhotoDetailOut(PhotoOut):
     pass
+
+
+class PhotoPrepareMissingIn(BaseModel):
+    include_failed: bool = False
+    include_raw_placeholders: bool = True
+
+
+class PhotoPrepareSelectedIn(BaseModel):
+    photo_ids: list[int]
+    force: bool = False
+
+
+class PhotoPrepareStartOut(BaseModel):
+    status: str
+    job_id: int | None = None
+    reason: str | None = None
+
+
+class PhotoPrepareStatusOut(BaseModel):
+    status: str
+    mode: str | None = None
+    total: int = 0
+    processed: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    skipped: int = 0
+    current_photo_id: int | None = None
+    current_path: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error: str | None = None
+
+
+class PhotoPrepareSummaryOut(BaseModel):
+    total_photos: int
+    ready: int
+    missing_thumbnail: int
+    missing_preview: int
+    failed: int
+    raw_total: int
+    raw_ready: int
+    raw_placeholder: int
 
 
 class MediaItemOut(BaseModel):

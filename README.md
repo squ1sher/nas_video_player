@@ -182,15 +182,37 @@ New `availability_status` field on `Video`:
 - On process restart, previously running HLS jobs are marked interrupted/failed to avoid duplicate ffmpeg execution.
 - Global queue and active batch progress are visible via `/api/hls/status` and batch detail endpoint.
 
+### Photo Preparation service (thumbnails, previews, RAW/ARW)
+- Library scan only indexes photos and metadata; it does **not** prepare all derived image assets synchronously.
+- Photo Preparation is a separate background service for comfortable browsing:
+  - grid thumbnails: `/app/thumbnails/photos/{photo_id}.jpg`, max long edge ~480px
+  - viewer previews: `/app/thumbnails/photos/{photo_id}_preview.jpg`, max long edge ~2048px
+- Original photo/RAW files are never modified and generated files are not written next to originals.
+- Settings includes **Photo Preparation** with summary counts, progress, `Prepare missing`, `Retry failed`, and `Cancel`.
+- The global bottom status bar shows running photo preparation progress and current file; polling survives page refresh.
+- API endpoints:
+  - `GET /api/photos/prepare/summary`
+  - `GET /api/photos/prepare/status`
+  - `POST /api/photos/prepare/missing`
+  - `POST /api/photos/prepare/selected`
+  - `POST /api/photos/prepare/cancel`
+- RAW/ARW behavior:
+  - tries embedded JPEG/BITMAP preview first via `rawpy`
+  - falls back to lightweight RAW conversion when embedded preview is unavailable
+  - if RAW support or conversion fails, the photo remains indexed and a clear RAW placeholder is used
+- Synology recommendation: prepare large photo libraries overnight; the service processes photos one at a time by default.
+
 ### Scheduler (daily jobs)
-- Settings now includes a **Scheduler** section with two jobs:
+- Settings now includes a **Scheduler** section with three jobs:
   - `Library scan`
   - `Prepare HLS for all missing`
-- Both jobs are **disabled by default**.
+  - `Prepare photo thumbnails/previews`
+- All jobs are **disabled by default**.
 - Schedule type is currently `daily` with configurable `HH:MM` time.
 - Scheduler uses container local time.
 - Jobs skip safely when related work is already running.
 - Scheduled HLS prepare-missing uses `480p` + `720p` defaults and skips existing HLS.
+- Scheduled photo preparation prepares missing thumbnails/previews and retries RAW placeholders; it skips while scan/photo preparation is already running.
 - Synology recommendation: run scheduled HLS at night and keep `MAX_CONCURRENT_HLS_JOBS=1` on DS923+.
 
 ### Open video in new tab

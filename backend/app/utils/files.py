@@ -26,6 +26,10 @@ def is_photo_file(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_EXTENSIONS
 
 
+def is_photo_extension(extension: str | None) -> bool:
+    return (extension or "").strip().lower() in IMAGE_EXTENSIONS
+
+
 def is_raw_photo_file(path: Path) -> bool:
     return path.suffix.lower() in RAW_PHOTO_EXTENSIONS
 
@@ -43,4 +47,3 @@ def guess_mime_type(path: Path) -> str:
     if suffix in MIME_OVERRIDES:
         return MIME_OVERRIDES[suffix]
     return mimetypes.guess_type(str(path))[0] or "application/octet-stream"
-

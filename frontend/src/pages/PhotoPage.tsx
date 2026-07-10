@@ -53,17 +53,45 @@ export function PhotoPage() {
   if (error) return <div className="error">{error}</div>;
   if (!photo) return <div className="status">Photo not found.</div>;
 
+  const previewSrc = photo.preview_url || `/api/photos/${photo.id}/preview`;
+
   return (
     <div className="page page-watch">
       <div style={{ marginBottom: 12 }}>
         <Link to="/" className="btn-secondary">Back to library</Link>
       </div>
       <div className="video-player-shell" style={{ padding: 12 }}>
-        <div style={{ display: "flex", justifyContent: "center", width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "center", width: "100%", position: "relative" }}>
+          {photo.raw_format ? (
+            <span
+              style={{
+                position: "absolute",
+                top: 8,
+                left: 8,
+                background: "rgba(0,0,0,0.7)",
+                color: "#fff",
+                fontSize: 12,
+                fontWeight: 700,
+                padding: "3px 8px",
+                borderRadius: 4,
+                letterSpacing: 0.5,
+                zIndex: 1,
+              }}
+            >
+              RAW
+            </span>
+          ) : null}
           <img
-            src={photo.preview_url || `/api/photos/${photo.id}/original`}
+            src={previewSrc}
             alt={photo.filename}
             style={{ maxWidth: "100%", maxHeight: "70vh", objectFit: "contain", borderRadius: 8 }}
+            onError={(e) => {
+              // Fall back to the thumbnail endpoint if preview failed to load.
+              const fallback = `/api/photos/${photo.id}/thumbnail`;
+              if (e.currentTarget.src.indexOf("/thumbnail") === -1) {
+                e.currentTarget.src = fallback;
+              }
+            }}
           />
         </div>
 

@@ -57,6 +57,11 @@ class Photo(Base):
     focal_length: Mapped[str | None] = mapped_column(String(32), nullable=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     preview_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    preview_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    preview_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prepare_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    prepare_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prepared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     media_identity: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
     scan_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
     thumbnail_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
@@ -376,6 +381,28 @@ class HlsBatchItem(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PhotoPrepareJob(Base):
+    __tablename__ = "photo_prepare_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
+    mode: Mapped[str] = mapped_column(String(32), nullable=False, default="missing", index=True)
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    succeeded: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_photo_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("photos.id", ondelete="SET NULL"), nullable=True, index=True)
+    current_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
 
 class ScheduledJob(Base):

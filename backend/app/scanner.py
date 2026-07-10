@@ -33,9 +33,9 @@ from app.services.media_profile_service import (
     upsert_media_profile,
 )
 from app.services.hls_service import reconcile_hls_variants_for_video
-from app.services.photo_service import extract_photo_metadata, generate_photo_thumbnail, upsert_photo_record
+from app.services.photo_service import extract_photo_metadata, upsert_photo_record
 from app.thumbnails import ensure_thumbnail
-from app.utils.files import VIDEO_EXTENSIONS, is_photo_file, is_raw_photo_file
+from app.utils.files import VIDEO_EXTENSIONS, is_photo_file
 
 logger = logging.getLogger(__name__)
 
@@ -129,22 +129,6 @@ def _scan_photo_file(
         scan_error=None,
     )
 
-    if metadata.raw_format or is_raw_photo_file(file_path):
-        saved_photo.thumbnail_status = "skipped"
-        saved_photo.thumbnail_error = "RAW thumbnail generation is not implemented in this phase"
-    else:
-        thumbnail_result = generate_photo_thumbnail(file_path, settings.thumbnails_path, saved_photo.id)
-        if thumbnail_result.path is not None:
-            saved_photo.thumbnail_path = str(thumbnail_result.path.relative_to(settings.thumbnails_path).as_posix())
-            saved_photo.thumbnail_status = "generated"
-            saved_photo.thumbnail_error = None
-            result.thumbnails_generated += 1
-            increment_progress(thumbnails_generated_inc=1)
-        else:
-            saved_photo.thumbnail_status = "failed"
-            saved_photo.thumbnail_error = thumbnail_result.error or "Thumbnail generation failed"
-            result.thumbnail_errors += 1
-            increment_progress(thumbnail_errors_inc=1)
 
     if added:
         result.added += 1
