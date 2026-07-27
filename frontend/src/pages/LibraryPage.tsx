@@ -15,11 +15,13 @@ import { SearchBar } from "../components/SearchBar";
 import { SortSelect } from "../components/SortSelect";
 import { VideoCard } from "../components/VideoCard";
 import { FolderTree } from "../components/folders/FolderTree";
+import { PhotoFolderTree } from "../components/folders/PhotoFolderTree";
 import { AddToPlaylistDialog } from "../components/playlists/AddToPlaylistDialog";
 import { TagFilterDialog } from "../components/tags/TagFilterDialog";
 import type { TagFilterState } from "../components/tags/TagFilterDialog";
 import { TagSelectorDialog } from "../components/tags/TagSelectorDialog";
 import type { PlaylistSummary, UnifiedMediaItem, VideoBulkDeleteResult, VideoListItem } from "../types/video";
+import { buildMediaFolderTree } from "../utils/buildMediaFolderTree";
 import { buildFolderTree } from "../utils/buildFolderTree";
 import { groupVideos } from "../utils/groupVideos";
 
@@ -30,6 +32,12 @@ type SourceGroup = {
   key: string;
   name: string;
   videos: VideoListItem[];
+};
+
+type MediaSourceGroup = {
+  key: string;
+  name: string;
+  items: UnifiedMediaItem[];
 };
 
 type VisibleGroup = {
@@ -56,6 +64,14 @@ function sourceLabel(video: VideoListItem): string {
 
 function sourceKey(video: VideoListItem): string {
   return `${video.library_root_id ?? "none"}:${sourceLabel(video)}`;
+}
+
+function mediaSourceLabel(item: UnifiedMediaItem): string {
+  return item.media_source_name || "Unassigned source";
+}
+
+function mediaSourceKey(item: UnifiedMediaItem): string {
+  return `${item.media_source_id ?? "none"}:${mediaSourceLabel(item)}`;
 }
 
 function formatSize(bytes: number): string {
@@ -93,6 +109,7 @@ export function LibraryPage() {
   const [visibleCount, setVisibleCount] = useState(LIBRARY_INITIAL_ITEMS);
   const [collapsedVideoGroups, setCollapsedVideoGroups] = useState<Set<string>>(new Set());
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [expandedPhotoFolders, setExpandedPhotoFolders] = useState<Set<string>>(new Set());
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -241,6 +258,32 @@ export function LibraryPage() {
     }));
   }, [folderSourceGroups]);
 
+  const photoFolderSourceGroups = useMemo<MediaSourceGroup[]>(() => {
+    const map = new Map<string, MediaSourceGroup>();
+    for (const item of mediaItems) {
+      if (item.type !== "photo") continue;
+      const key = mediaSourceKey(item);
+      const existing = map.get(key);
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        map.set(key, {
+          key,
+          name: mediaSourceLabel(item),
+          items: [item],
+        });
+      }
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+  }, [mediaItems]);
+
+  const photoFolderTrees = useMemo(() => {
+    return photoFolderSourceGroups.map((group) => ({
+      ...group,
+      tree: buildMediaFolderTree(group.items),
+    }));
+  }, [photoFolderSourceGroups]);
+
   const loadAllVideos = async () => {
     const queryText = search.trim() || undefined;
     const data = await fetchVideos({
@@ -369,6 +412,15 @@ export function LibraryPage() {
 
   const toggleFolder = (path: string) => {
     setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const togglePhotoFolder = (path: string) => {
+    setExpandedPhotoFolders((prev) => {
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
       else next.add(path);
@@ -614,6 +666,11 @@ export function LibraryPage() {
             <button className={tab === "folders" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("folders")}>Folders</button>
             <button className={tab === "playlists" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("playlists")}>Playlists</button>
           </nav>
+        ) : mode === "photos" ? (
+          <nav className="lib-tabs lib-tabs-compact">
+            <button className={tab === "all" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("all")}>All Photos</button>
+            <button className={tab === "folders" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("folders")}>Folders</button>
+          </nav>
         ) : null}
         <div className="library-controls-compact">
           {(mode !== "videos" || tab !== "playlists") ? <SearchBar value={search} onChange={setSearch} /> : null}
@@ -857,7 +914,41 @@ export function LibraryPage() {
         </div>
       )}
 
-      {mode !== "videos" && (
+      {mode === "photos" && tab === "folders" && (
+        <div className="folders-panel">
+          {loading ? (
+            <div className="status">Loading folders...</div>
+          ) : photoFolderTrees.length === 0 ? (
+            <div className="status">No photo folders found. Add a Photo or Mixed source and run a scan.</div>
+          ) : (
+            photoFolderTrees.map((source) => {
+              const prefixedExpanded = new Set(
+                [...expandedPhotoFolders]
+                  .filter((entry) => entry.startsWith(`${source.key}::`))
+                  .map((entry) => entry.slice(source.key.length + 2))
+              );
+
+              return (
+                <section key={source.key} className="folder-source-section">
+                  <h3 className="folder-source-title">{source.name}</h3>
+                  <PhotoFolderTree
+                    root={source.tree}
+                    expandedPaths={prefixedExpanded}
+                    onToggle={(path) => togglePhotoFolder(`${source.key}::${path}`)}
+                    sort={sort}
+                    order={order}
+                    selectionMode={selectionMode}
+                    selectedMediaKeys={selectedMediaKeys}
+                    onToggleMediaSelect={(item) => toggleMediaItem(getMediaItemKey(item))}
+                  />
+                </section>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {(mode !== "videos" && !(mode === "photos" && tab === "folders")) && (
         <>
           {loading ? (
             <div className="status">Loading media...</div>

@@ -1,3 +1,21 @@
+# Сборка + запуск
+docker compose up -d --build
+
+# Запуск (без пересборки)
+docker compose up -d
+
+# Остановка
+docker compose stop
+
+# Удаление контейнера/сети (и анонимных volume)
+docker compose down -v
+
+# Логи (поток)
+docker compose logs -f
+
+# Логи только сервиса продукта
+docker compose logs -f video-player
+
 # Local NAS Video Player
 
 Mini-YouTube style local web video player for Synology NAS.
