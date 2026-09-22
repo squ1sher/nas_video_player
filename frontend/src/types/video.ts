@@ -576,6 +576,7 @@ export type LibraryRoot = {
   created_at: string;
   updated_at: string;
   video_count: number;
+  photo_count: number;
 };
 
 export type LibraryRootIn = {
@@ -669,6 +670,23 @@ export type UnifiedMediaItem = {
 export type UnifiedMediaList = {
   items: UnifiedMediaItem[];
   total: number;
+};
+
+export type MediaGroup = {
+  group_key: string;
+  group_type: "year" | "month" | "bucket" | string;
+  label: string;
+  count: number;
+  children_loaded?: boolean;
+  items_loaded?: boolean;
+};
+
+export type MediaGroupItems = {
+  items: UnifiedMediaItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
 };
 
 export type PhotoPrepareStatus = {

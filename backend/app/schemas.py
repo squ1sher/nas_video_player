@@ -662,7 +662,7 @@ class PlaybackSourceOut(BaseModel):
 class LibraryRootIn(BaseModel):
     name: str
     path: str
-    media_type: str = "video"
+    media_type: str = "mixed"
     enabled: bool = True
     recursive: bool = True
     scan_priority: int = 100
@@ -693,6 +693,7 @@ class LibraryRootOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     video_count: int = 0
+    photo_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -855,5 +856,22 @@ class MediaItemOut(BaseModel):
 class MediaListQueryOut(BaseModel):
     items: list[MediaItemOut]
     total: int
+
+
+class MediaGroupOut(BaseModel):
+    group_key: str
+    group_type: str  # "year" | "month" | "bucket"
+    label: str
+    count: int
+    children_loaded: bool = False
+    items_loaded: bool = False
+
+
+class MediaGroupItemsOut(BaseModel):
+    items: list[MediaItemOut]
+    total: int
+    offset: int
+    limit: int
+    has_more: bool
 
 

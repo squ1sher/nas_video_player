@@ -45,6 +45,8 @@ import type {
   PhotoPrepareStatus,
   PhotoPrepareSummary,
   UnifiedMediaList,
+  MediaGroup,
+  MediaGroupItems,
   VideoDetail,
   VideoListItem,
   VideoBulkDeleteResult,
@@ -179,6 +181,68 @@ export async function fetchMedia(params: {
 
   const suffix = query.toString() ? `?${query}` : "";
   return handleResponse<UnifiedMediaList>(await fetch(`${API_BASE}/media${suffix}`));
+}
+
+export type MediaGroupBy = "date" | "file_size" | "duration";
+
+export type MediaGroupFilters = {
+  type?: "video" | "photo" | "all";
+  group_by?: MediaGroupBy;
+  order?: SortOrder;
+  search?: string;
+  tag_ids?: number[];
+  tag_mode?: "any" | "all";
+  without_tags?: boolean;
+  media_source_id?: number;
+  folder?: string;
+  playlist_id?: number;
+};
+
+function applyMediaGroupFilters(query: URLSearchParams, params: MediaGroupFilters): void {
+  if (params.type) query.set("type", params.type);
+  if (params.group_by) query.set("group_by", params.group_by);
+  if (params.order) query.set("order", params.order);
+  if (params.search) query.set("search", params.search);
+  if (params.tag_ids && params.tag_ids.length > 0) query.set("tag_ids", params.tag_ids.join(","));
+  if (params.tag_mode) query.set("tag_mode", params.tag_mode);
+  if (params.without_tags) query.set("without_tags", String(params.without_tags));
+  if (params.media_source_id !== undefined) query.set("media_source_id", String(params.media_source_id));
+  if (params.folder !== undefined) query.set("folder", params.folder);
+  if (params.playlist_id !== undefined) query.set("playlist_id", String(params.playlist_id));
+}
+
+export async function fetchMediaGroups(
+  params: MediaGroupFilters & { year?: number }
+): Promise<MediaGroup[]> {
+  const query = new URLSearchParams();
+  applyMediaGroupFilters(query, params);
+  if (params.year !== undefined) query.set("year", String(params.year));
+  const suffix = query.toString() ? `?${query}` : "";
+  return handleResponse<MediaGroup[]>(await fetch(`${API_BASE}/media/groups${suffix}`));
+}
+
+export async function fetchMediaGroupItems(
+  params: MediaGroupFilters & {
+    sort?: MediaGroupBy;
+    year?: number;
+    month?: number;
+    bucket?: string;
+    unknown?: boolean;
+    offset?: number;
+    limit?: number;
+  }
+): Promise<MediaGroupItems> {
+  const query = new URLSearchParams();
+  applyMediaGroupFilters(query, params);
+  if (params.sort) query.set("sort", params.sort);
+  if (params.year !== undefined) query.set("year", String(params.year));
+  if (params.month !== undefined) query.set("month", String(params.month));
+  if (params.bucket !== undefined) query.set("bucket", params.bucket);
+  if (params.unknown) query.set("unknown", String(params.unknown));
+  if (params.offset !== undefined) query.set("offset", String(params.offset));
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  const suffix = query.toString() ? `?${query}` : "";
+  return handleResponse<MediaGroupItems>(await fetch(`${API_BASE}/media/group-items${suffix}`));
 }
 
 export async function getPlaybackSource(videoId: number): Promise<PlaybackSource> {

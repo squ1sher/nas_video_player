@@ -115,6 +115,7 @@ New `availability_status` field on `Video`:
 - Each media source stores:
   - name, path, enabled flag, recursive flag, scan priority
   - last scan time, last scan status, last error
+- **Sources are not scanned by category.** Every enabled source scans **all** files; each file is classified/grouped automatically as a video or a photo by its type. There is no per-source Video/Photo selection — the Media Sources table shows a combined **Items** count (videos + photos).
 - Media source paths are validated against optional `ALLOWED_MEDIA_ROOT_BASES`
 - Backward compatibility: if no media sources exist yet, a default one is created from `VIDEO_LIBRARY_PATH`
 - Indexed videos now store `library_root_id`, so identical relative paths can exist in different sources
@@ -165,15 +166,20 @@ New `availability_status` field on `Video`:
 - Sort controls in library UI: `Date`, `Duration`, `File size`
 - Separate order toggle switches between ascending and descending
 
-### Grouped All Videos UI
-- **All Videos** now renders grouped sections based on the selected sort mode.
-- Date sort: grouped by month and year (for example `May 2026`) using `file_modified_at` with fallbacks.
-- Duration sort: `Under 3 minutes`, `3-20 minutes`, `Over 20 minutes`, `Unknown duration`.
-- File size sort (GiB buckets): `Under 1 GB`, `1-20 GB`, `20-100 GB`, `Over 100 GB`, `Unknown size`.
-- Grouping is applied after search and filters.
-- Every group can be collapsed/expanded.
-- Library cards are thumbnail-first with a compact hover title overlay (metadata lines are not shown under thumbnails).
-- The page renders an initial batch and uses a manual **Load more** button to reveal additional cards, reducing thumbnail load spikes.
+### Lazy grouped media browsing (All Videos / All Photos / All Media)
+- **All Videos**, **All Photos**, and **All Media** render collapsed group summaries first; no media thumbnails are fetched on initial page load.
+- Date grouping is **hierarchical and lazy**:
+  - **Year** groups (collapsed by default).
+  - Expanding a year loads **Month** subgroups (also collapsed by default).
+  - Expanding a month loads that month's media items (video and/or photo) page by page.
+- Non-date grouping uses single-level collapsed buckets:
+  - Duration: `Under 3 minutes`, `3-20 minutes`, `Over 20 minutes`, `Unknown duration`.
+  - File size (GiB buckets): `Under 1 GB`, `1-20 GB`, `20-100 GB`, `Over 100 GB`, `Unknown size`.
+- Order (ASC/DESC) controls year, month, and item order; group counts and summaries respect search, tag filters, media source, folder, and playlist scope.
+- The manual **Load more** button was removed. Expanded groups load more automatically via an `IntersectionObserver` sentinel (infinite scroll). Ungrouped lists (for example, playlist order in playlist detail) also auto-load on scroll.
+- In selection mode, a group checkbox appears only on expanded groups with **loaded** items, and selects only those loaded/rendered items — unloaded items are never selected silently. Changing mode, search, tag filter, sort, or order clears the current selection.
+- Backed by grouped summary APIs: `GET /api/media/groups` (year/month summaries or size/duration buckets) and `GET /api/media/group-items` (paginated items for an expanded group).
+- Library cards are thumbnail-first with a compact hover title overlay.
 
 ### Pre-generated HLS streaming (manual per-video)
 - HLS variants are prepared **on demand** for a selected video.
@@ -294,7 +300,7 @@ New `availability_status` field on `Video`:
 - Active background processes are shown in a global bottom status bar (scan, HLS batch/jobs, duplicate scan).
 - Library no longer contains Duplicates/Diagnostics process panels or large maintenance controls.
 - Library cards stay thumbnail-first; hover overlay shows title and assigned tag paths.
-- All Videos uses manual `Load more` to keep thumbnail loading lighter on NAS/browser.
+- All Videos, All Photos, and All Media use collapsed lazy groups with automatic infinite-scroll loading (no manual `Load more`).
 
 ### Hierarchical tags (v1)
 
@@ -324,7 +330,7 @@ New `availability_status` field on `Video`:
   - `Without tags` (videos with zero assigned tags)
 - Active filters are shown as compact chips below the header only when enabled.
 - Chips can be removed individually and `Clear` removes all tag filters.
-- Tag filtering composes with search, sort/order, grouping, folders view, and manual **Load more**.
+- Tag filtering composes with search, sort/order, lazy grouping, folders view, and automatic infinite-scroll loading.
 
 ### Playlists (manual ordered lists)
 
@@ -335,7 +341,7 @@ New `availability_status` field on `Video`:
   - create a new playlist and add selected videos in one flow.
 - Duplicate videos in the same playlist are skipped (one video per playlist for now).
 - Playlist detail is a library-like gallery scoped to playlist videos:
-  - search, tag filter (`Any` / `All` / `Without tags`), grouping, and **Load more**
+  - search, tag filter (`Any` / `All` / `Without tags`), grouping, and automatic infinite-scroll loading (no manual `Load more`)
   - sort by `Playlist order`, `Date`, `Duration`, or `File size`
   - open a playlist video with context (`/watch/{id}?playlist_id=...`) for Previous/Next playback
   - selection mode actions: add tags, remove from playlist (video files remain), delete selected video files
@@ -618,6 +624,22 @@ You do not need to edit `docker-compose.yml` for every new media subfolder; add 
 | `GET` | `/api/videos/{id}/progress` | Get watch progress |
 | `PUT` | `/api/videos/{id}/progress` | Save watch progress |
 | `GET` | `/api/videos/continue-watching` | In-progress videos |
+
+### Unified media / lazy grouped browsing
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/media` | Unified media list (video / photo / all) with filters and sort |
+| `GET` | `/api/media/groups` | Collapsed group summaries: year groups, month subgroups (with `year=`), or size/duration buckets |
+| `GET` | `/api/media/group-items` | Paginated media items for one expanded group (`offset`/`limit`/`has_more`) |
+
+`GET /api/media/groups` and `GET /api/media/group-items` share filters:
+- `type=video|photo|all`
+- `group_by=date|file_size|duration`
+- `order=asc|desc`
+- `search`, `tag_ids=1,2,3`, `tag_mode=any|all`, `without_tags=true|false`
+- `media_source_id`, `folder`, `playlist_id`
+- `groups`: pass `year=YYYY` to get that year's month subgroups
+- `group-items`: `year`, `month`, `bucket`, `unknown=true` (null-date items), `sort`, `offset`, `limit`
 
 ### Folders
 | Method | Path | Description |

@@ -12,6 +12,7 @@ import {
 } from "../api/client";
 import type { SortField, SortOrder } from "../api/client";
 import { GroupCheckbox } from "../components/GroupCheckbox";
+import { InfiniteScrollSentinel } from "../components/media/InfiniteScrollSentinel";
 import { SearchBar } from "../components/SearchBar";
 import { VideoCard } from "../components/VideoCard";
 import { TagFilterDialog } from "../components/tags/TagFilterDialog";
@@ -400,7 +401,7 @@ export function PlaylistDetailPage() {
     setActionNotice(null);
   };
 
-  // ─── Load more ────────────────────────────────────────────────────────────
+  // ─── Infinite scroll (auto-load next page) ─────────────────────────────────
 
   const loadMoreVideos = () => { setVisibleCount((prev) => prev + LOAD_MORE_ITEMS); };
 
@@ -842,13 +843,13 @@ export function PlaylistDetailPage() {
                 );
               })}
 
+              {canLoadMore ? (
+                <InfiniteScrollSentinel onVisible={loadMoreVideos} />
+              ) : null}
               <div className="library-load-more-row">
-                <span className="library-load-more-count">Showing {totalVisible} of {filteredItems.length}</span>
-                {canLoadMore ? (
-                  <button className="btn-secondary" onClick={loadMoreVideos}>Load more</button>
-                ) : (
-                  <span className="library-load-more-done">All videos loaded</span>
-                )}
+                <span className="library-load-more-count">
+                  {canLoadMore ? "Loading more..." : `${totalVisible} of ${filteredItems.length}`}
+                </span>
               </div>
             </div>
           )}

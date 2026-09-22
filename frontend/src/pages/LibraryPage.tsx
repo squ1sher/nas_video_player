@@ -9,13 +9,12 @@ import {
   fetchVideos,
   getPlaylists,
 } from "../api/client";
-import type { SortField, SortOrder } from "../api/client";
-import { GroupCheckbox } from "../components/GroupCheckbox";
+import type { MediaGroupBy, SortField, SortOrder } from "../api/client";
 import { SearchBar } from "../components/SearchBar";
 import { SortSelect } from "../components/SortSelect";
-import { VideoCard } from "../components/VideoCard";
 import { FolderTree } from "../components/folders/FolderTree";
 import { PhotoFolderTree } from "../components/folders/PhotoFolderTree";
+import { GroupedMediaBrowser } from "../components/media/GroupedMediaBrowser";
 import { AddToPlaylistDialog } from "../components/playlists/AddToPlaylistDialog";
 import { TagFilterDialog } from "../components/tags/TagFilterDialog";
 import type { TagFilterState } from "../components/tags/TagFilterDialog";
@@ -23,7 +22,6 @@ import { TagSelectorDialog } from "../components/tags/TagSelectorDialog";
 import type { PlaylistSummary, UnifiedMediaItem, VideoBulkDeleteResult, VideoListItem } from "../types/video";
 import { buildMediaFolderTree } from "../utils/buildMediaFolderTree";
 import { buildFolderTree } from "../utils/buildFolderTree";
-import { groupVideos } from "../utils/groupVideos";
 
 type Tab = "all" | "folders" | "playlists";
 type LibraryMode = "videos" | "photos" | "all";
@@ -40,22 +38,6 @@ type MediaSourceGroup = {
   items: UnifiedMediaItem[];
 };
 
-type VisibleGroup = {
-  key: string;
-  title: string;
-  videos: VideoListItem[];
-  totalCount: number;
-};
-
-type MediaVisibleGroup = {
-  key: string;
-  title: string;
-  items: UnifiedMediaItem[];
-  totalCount: number;
-};
-
-const LIBRARY_INITIAL_ITEMS = 60;
-const LIBRARY_LOAD_MORE_ITEMS = 60;
 const MAX_ACTIVE_TAG_CHIPS = 3;
 
 function sourceLabel(video: VideoListItem): string {
@@ -85,11 +67,10 @@ function formatSize(bytes: number): string {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
-function formatMediaGroupTitle(value: string | null): string {
-  if (!value) return "Unknown date";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown date";
-  return date.toLocaleString(undefined, { month: "long", year: "numeric" });
+function mediaGroupByFromSort(sort: SortField): MediaGroupBy {
+  if (sort === "size") return "file_size";
+  if (sort === "duration") return "duration";
+  return "date";
 }
 
 export function LibraryPage() {
@@ -97,7 +78,6 @@ export function LibraryPage() {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [mode, setMode] = useState<LibraryMode>("videos");
   const [tab, setTab] = useState<Tab>("all");
-  const [videos, setVideos] = useState<VideoListItem[]>([]);
   const [mediaItems, setMediaItems] = useState<UnifiedMediaItem[]>([]);
   const [folderVideos, setFolderVideos] = useState<VideoListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,15 +86,13 @@ export function LibraryPage() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortField>("file_modified_at");
   const [order, setOrder] = useState<SortOrder>("desc");
-  const [visibleCount, setVisibleCount] = useState(LIBRARY_INITIAL_ITEMS);
-  const [collapsedVideoGroups, setCollapsedVideoGroups] = useState<Set<string>>(new Set());
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [expandedPhotoFolders, setExpandedPhotoFolders] = useState<Set<string>>(new Set());
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectedMediaKeys, setSelectedMediaKeys] = useState<Set<string>>(new Set());
-  const [collapsedMediaGroups, setCollapsedMediaGroups] = useState<Set<string>>(new Set());
+  const [loadedItemsByKey, setLoadedItemsByKey] = useState<Map<string, UnifiedMediaItem>>(new Map());
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagFilterDialogOpen, setTagFilterDialogOpen] = useState(false);
   const [tagFilter, setTagFilter] = useState<TagFilterState>({ selectedTagIds: [], mode: "any", withoutTags: false });
@@ -131,24 +109,6 @@ export function LibraryPage() {
   const [bulkDeleteResult, setBulkDeleteResult] = useState<VideoBulkDeleteResult | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
-  const groupedVideos = useMemo(() => groupVideos(videos, { sort, order }), [videos, sort, order]);
-  const groupedMedia = useMemo(() => {
-    const groups = new Map<string, MediaVisibleGroup>();
-    for (const item of mediaItems) {
-      const title = formatMediaGroupTitle(item.date);
-      const key = title.toLowerCase();
-      const existing = groups.get(key);
-      if (existing) {
-        existing.items.push(item);
-      } else {
-        groups.set(key, { key, title, items: [item], totalCount: 0 });
-      }
-    }
-    return [...groups.values()].map((group) => ({
-      ...group,
-      totalCount: group.items.length,
-    }));
-  }, [mediaItems]);
   const hasActiveTagFilter = tagFilter.withoutTags || tagFilter.selectedTagIds.length > 0;
 
   const activeTagChipItems = useMemo(() => {
@@ -164,69 +124,36 @@ export function LibraryPage() {
   const visibleTagChipItems = activeTagChipItems.slice(0, MAX_ACTIVE_TAG_CHIPS);
   const hiddenTagChipCount = Math.max(0, activeTagChipItems.length - visibleTagChipItems.length);
 
-  const visibleGroupedVideos = useMemo<VisibleGroup[]>(() => {
-    let remaining = visibleCount;
-    const result: VisibleGroup[] = [];
-    for (const group of groupedVideos) {
-      if (remaining <= 0) break;
-      const visibleVideos = group.videos.slice(0, remaining);
-      if (visibleVideos.length > 0) {
-        result.push({
-          key: group.key,
-          title: group.title,
-          videos: visibleVideos,
-          totalCount: group.videos.length,
-        });
-        remaining -= visibleVideos.length;
-      }
-    }
-    return result;
-  }, [groupedVideos, visibleCount]);
+  const groupByForBrowser = mediaGroupByFromSort(sort);
 
-  const visibleGroupedMedia = useMemo<MediaVisibleGroup[]>(() => {
-    let remaining = visibleCount;
-    const result: MediaVisibleGroup[] = [];
-    for (const group of groupedMedia) {
-      if (remaining <= 0) break;
-      const visibleItems = group.items.slice(0, remaining);
-      if (visibleItems.length > 0) {
-        result.push({
-          key: group.key,
-          title: group.title,
-          items: visibleItems,
-          totalCount: group.totalCount,
-        });
-        remaining -= visibleItems.length;
-      }
-    }
-    return result;
-  }, [groupedMedia, visibleCount]);
-
-  const totalVisibleVideos = useMemo(
-    () => visibleGroupedVideos.reduce((count, group) => count + group.videos.length, 0),
-    [visibleGroupedVideos]
-  );
-
-  const totalVisibleMedia = useMemo(
-    () => visibleGroupedMedia.reduce((count, group) => count + group.items.length, 0),
-    [visibleGroupedMedia]
-  );
-
-  const canLoadMoreVideos = totalVisibleVideos < videos.length;
-  const canLoadMoreMedia = totalVisibleMedia < mediaItems.length;
-
-  const visibleVideos = useMemo(() => {
-    if (mode !== "videos") return [];
-    if (tab === "all") {
-      return visibleGroupedVideos.flatMap((group) => group.videos);
-    }
-    return folderVideos;
-  }, [folderVideos, mode, tab, visibleGroupedVideos]);
-
+  // Selected videos for bulk operations (delete / tag / add-to-playlist).
+  // In folder view selection is tracked by numeric id; in grouped views it is
+  // tracked by typed media key and resolved against loaded items.
   const selectedVideos = useMemo(() => {
-    const selected = selectedIds;
-    return visibleVideos.filter((video) => selected.has(video.id));
-  }, [selectedIds, visibleVideos]);
+    if (mode === "videos" && tab === "folders") {
+      return folderVideos
+        .filter((video) => selectedIds.has(video.id))
+        .map((video) => ({
+          id: video.id,
+          title: video.title,
+          filename: video.filename,
+          size: video.size,
+        }));
+    }
+    const result: Array<{ id: number; title: string; filename: string; size: number }> = [];
+    for (const key of selectedMediaKeys) {
+      if (!key.startsWith("video:")) continue;
+      const item = loadedItemsByKey.get(key);
+      if (!item) continue;
+      result.push({
+        id: item.id,
+        title: item.display_title,
+        filename: item.extension ? `${item.display_title}.${item.extension}` : item.display_title,
+        size: item.file_size,
+      });
+    }
+    return result;
+  }, [mode, tab, folderVideos, selectedIds, selectedMediaKeys, loadedItemsByKey]);
 
   const selectedTotalSize = useMemo(
     () => selectedVideos.reduce((sum, video) => sum + video.size, 0),
@@ -284,19 +211,6 @@ export function LibraryPage() {
     }));
   }, [photoFolderSourceGroups]);
 
-  const loadAllVideos = async () => {
-    const queryText = search.trim() || undefined;
-    const data = await fetchVideos({
-      q: queryText,
-      sort,
-      order,
-      tag_ids: tagFilter.withoutTags ? undefined : tagFilter.selectedTagIds,
-      tag_mode: tagFilter.mode,
-      without_tags: tagFilter.withoutTags,
-    });
-    setVideos(data);
-  };
-
   const loadFolderVideos = async () => {
     const data = await fetchVideos({
       sort,
@@ -330,18 +244,23 @@ export function LibraryPage() {
     const run = async () => {
       try {
         setError(null);
-        if (mode !== "videos") {
+        if (mode === "videos") {
+          if (tab === "all") {
+            // Grouped browser self-fetches summaries lazily.
+            setLoading(false);
+          } else if (tab === "folders") {
+            setFolderLoading(true);
+            await loadFolderVideos();
+          } else {
+            setPlaylistLoading(true);
+            await loadPlaylists();
+          }
+        } else if (mode === "photos" && tab === "folders") {
           setLoading(true);
           await loadMediaItems(mode);
-        } else if (tab === "all") {
-          setLoading(true);
-          await loadAllVideos();
-        } else if (tab === "folders") {
-          setFolderLoading(true);
-          await loadFolderVideos();
         } else {
-          setPlaylistLoading(true);
-          await loadPlaylists();
+          // Photos "all" and mixed "all" use the grouped browser.
+          setLoading(false);
         }
       } catch (err) {
         if (!isMounted) return;
@@ -373,7 +292,8 @@ export function LibraryPage() {
 
   useEffect(() => {
     if (!selectionMode) return;
-    const validIds = new Set(visibleVideos.map((video) => video.id));
+    if (!(mode === "videos" && tab === "folders")) return;
+    const validIds = new Set(folderVideos.map((video) => video.id));
     setSelectedIds((prev) => {
       const next = new Set<number>();
       prev.forEach((id) => {
@@ -381,7 +301,7 @@ export function LibraryPage() {
       });
       return next;
     });
-  }, [selectionMode, visibleVideos]);
+  }, [selectionMode, mode, tab, folderVideos]);
 
   useEffect(() => {
     if (tab !== "playlists" || true) return; // playlist detail now uses separate page
@@ -399,15 +319,6 @@ export function LibraryPage() {
   const handleSortChange = (nextSort: SortField, nextOrder: SortOrder) => {
     setSort(nextSort);
     setOrder(nextOrder);
-  };
-
-  const toggleVideoGroup = (groupKey: string) => {
-    setCollapsedVideoGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupKey)) next.delete(groupKey);
-      else next.add(groupKey);
-      return next;
-    });
   };
 
   const toggleFolder = (path: string) => {
@@ -428,32 +339,21 @@ export function LibraryPage() {
     });
   };
 
-  const loadMoreVideos = () => {
-    setVisibleCount((prev) => prev + LIBRARY_LOAD_MORE_ITEMS);
-  };
-
-  useEffect(() => {
-    setVisibleCount(LIBRARY_INITIAL_ITEMS);
-  }, [mode, tab, search, sort, order, tagFilter]);
-
-  // Clear stale media selection when filters/mode change
-  useEffect(() => {
-    setSelectedMediaKeys(new Set());
-  }, [mode, search, sort, order, tagFilter]);
-
-  // Prune stale media keys when visibleGroupedMedia changes (Load more updates valid set)
-  useEffect(() => {
-    if (!selectionMode || mode === "videos") return;
-    const validKeys = new Set(
-      visibleGroupedMedia.flatMap((g) => g.items).map((item) => `${item.type}:${item.id}`)
-    );
-    setSelectedMediaKeys((prev) => {
-      const next = new Set<string>();
-      prev.forEach((k) => { if (validKeys.has(k)) next.add(k); });
+  const handleItemsLoaded = (items: UnifiedMediaItem[]) => {
+    setLoadedItemsByKey((prev) => {
+      const next = new Map(prev);
+      for (const item of items) {
+        next.set(`${item.type}:${item.id}`, item);
+      }
       return next;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleGroupedMedia]);
+  };
+
+  // Reset lazy selection/loaded state whenever the filter context changes.
+  useEffect(() => {
+    setSelectedMediaKeys(new Set());
+    setLoadedItemsByKey(new Map());
+  }, [mode, tab, search, sort, order, tagFilter]);
 
   useEffect(() => {
     if (tab === "playlists" && selectionMode) {
@@ -530,31 +430,12 @@ export function LibraryPage() {
   };
 
   // ── Group-level selection toggles ────────────────────────────────────────────
-  const toggleGroupVideoSelection = (videoIds: number[]) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      const allSelected = videoIds.every((id) => next.has(id));
-      if (allSelected) videoIds.forEach((id) => next.delete(id));
-      else videoIds.forEach((id) => next.add(id));
-      return next;
-    });
-  };
-
   const toggleGroupMediaSelection = (itemKeys: string[]) => {
     setSelectedMediaKeys((prev) => {
       const next = new Set(prev);
       const allSelected = itemKeys.every((k) => next.has(k));
       if (allSelected) itemKeys.forEach((k) => next.delete(k));
       else itemKeys.forEach((k) => next.add(k));
-      return next;
-    });
-  };
-
-  const toggleMediaGroup = (groupKey: string) => {
-    setCollapsedMediaGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupKey)) next.delete(groupKey);
-      else next.add(groupKey);
       return next;
     });
   };
@@ -590,8 +471,17 @@ export function LibraryPage() {
       setBulkDeleteResult(result);
       if (result.deleted.length > 0) {
         const deleted = new Set(result.deleted);
-        setVideos((prev) => prev.filter((video) => !deleted.has(video.id)));
         setFolderVideos((prev) => prev.filter((video) => !deleted.has(video.id)));
+        setLoadedItemsByKey((prev) => {
+          const next = new Map(prev);
+          for (const id of deleted) next.delete(`video:${id}`);
+          return next;
+        });
+        setSelectedMediaKeys((prev) => {
+          const next = new Set(prev);
+          for (const id of deleted) next.delete(`video:${id}`);
+          return next;
+        });
       }
     } catch (err) {
       setBulkDeleteResult({
@@ -608,7 +498,9 @@ export function LibraryPage() {
     if (videoIds.length === 0 || tagIds.length === 0) return;
 
     const result = await bulkAssignTags(videoIds, tagIds);
-    await Promise.all([loadAllVideos(), loadFolderVideos()]);
+    if (mode === "videos" && tab === "folders") {
+      await loadFolderVideos();
+    }
     clearSelectionAndExit();
     setActionNotice(
       `Assigned ${result.tags_assigned} tag(s) to ${result.videos_processed} selected video(s).`
@@ -774,81 +666,25 @@ export function LibraryPage() {
       {actionNotice && <div className="notice">{actionNotice}</div>}
 
       {mode === "videos" && tab === "all" && (
-        <>
-          {loading ? (
-            <div className="status">Loading videos...</div>
-          ) : videos.length === 0 ? (
-            <div className="status">
-              {hasActiveTagFilter
-                ? "No videos match the selected tag filters."
-                : "No videos found. Add media sources in Settings and run a scan."}
-            </div>
-          ) : (
-            <div className="video-group-list">
-              {visibleGroupedVideos.map((group) => {
-                const groupVideoIds = group.videos.map((v) => v.id);
-                const selectedInGroupCount = selectionMode
-                  ? groupVideoIds.filter((id) => selectedIds.has(id)).length
-                  : 0;
-                const groupChecked =
-                  selectedInGroupCount > 0 && selectedInGroupCount === groupVideoIds.length;
-                const groupIndeterminate =
-                  selectedInGroupCount > 0 && selectedInGroupCount < groupVideoIds.length;
-
-                return (
-                  <section key={group.key} className="video-group-section">
-                    <div className="video-group-header">
-                      {selectionMode ? (
-                        <GroupCheckbox
-                          checked={groupChecked}
-                          indeterminate={groupIndeterminate}
-                          disabled={groupVideoIds.length === 0}
-                          onChange={() => toggleGroupVideoSelection(groupVideoIds)}
-                          label={`Select all loaded items in ${group.title}`}
-                        />
-                      ) : null}
-                      <button
-                        className="video-group-toggle"
-                        onClick={() => toggleVideoGroup(group.key)}
-                      >
-                        <span>{collapsedVideoGroups.has(group.key) ? "▶" : "▼"}</span>
-                        <span>
-                          {group.title} · {group.videos.length} / {group.totalCount} videos
-                          {selectionMode && selectedInGroupCount > 0 ? (
-                            <span className="video-group-select-count">
-                              {" "}· {selectedInGroupCount} / {groupVideoIds.length} selected
-                            </span>
-                          ) : null}
-                        </span>
-                      </button>
-                    </div>
-                    {!collapsedVideoGroups.has(group.key) && (
-                      <div className="video-grid video-grid-grouped">
-                        {group.videos.map((video) => (
-                          <VideoCard
-                            key={video.id}
-                            video={video}
-                            selectionMode={selectionMode}
-                            selected={selectedIds.has(video.id)}
-                            onToggleSelect={toggleSelected}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                );
-              })}
-              <div className="library-load-more-row">
-                <span className="library-load-more-count">Showing {totalVisibleVideos} of {videos.length}</span>
-                {canLoadMoreVideos ? (
-                  <button className="btn-secondary" onClick={loadMoreVideos}>Load more</button>
-                ) : (
-                  <span className="library-load-more-done">All videos loaded</span>
-                )}
-              </div>
-            </div>
-          )}
-        </>
+        <GroupedMediaBrowser
+          type="video"
+          groupBy={groupByForBrowser}
+          order={order}
+          search={search}
+          tagIds={tagFilter.withoutTags ? undefined : tagFilter.selectedTagIds}
+          tagMode={tagFilter.mode}
+          withoutTags={tagFilter.withoutTags}
+          selectionMode={selectionMode}
+          selectedKeys={selectedMediaKeys}
+          onToggleItem={(item) => toggleMediaItem(getMediaItemKey(item))}
+          onToggleGroupItems={(items) => toggleGroupMediaSelection(items.map(getMediaItemKey))}
+          onItemsLoaded={handleItemsLoaded}
+          emptyMessage={
+            hasActiveTagFilter
+              ? "No videos match the selected tag filters."
+              : "No videos found. Add media sources in Settings and run a scan."
+          }
+        />
       )}
 
       {mode === "videos" && tab === "folders" && (
@@ -949,171 +785,22 @@ export function LibraryPage() {
       )}
 
       {(mode !== "videos" && !(mode === "photos" && tab === "folders")) && (
-        <>
-          {loading ? (
-            <div className="status">Loading media...</div>
-          ) : mediaItems.length === 0 ? (
-            <div className="status">
-              {mode === "photos" ? "No photos found. Add a Photo or Mixed source and run a scan." : "No media found."}
-            </div>
-          ) : (
-            <div className="video-group-list">
-              {visibleGroupedMedia.map((group) => {
-                const groupItemKeys = group.items.map(getMediaItemKey);
-                const selectedInGroupCount = selectionMode
-                  ? groupItemKeys.filter((k) => selectedMediaKeys.has(k)).length
-                  : 0;
-                const groupChecked =
-                  selectedInGroupCount > 0 && selectedInGroupCount === groupItemKeys.length;
-                const groupIndeterminate =
-                  selectedInGroupCount > 0 && selectedInGroupCount < groupItemKeys.length;
-                const isCollapsed = collapsedMediaGroups.has(group.key);
-
-                return (
-                  <section key={group.key} className="video-group-section">
-                    <div className="video-group-header">
-                      {selectionMode ? (
-                        <GroupCheckbox
-                          checked={groupChecked}
-                          indeterminate={groupIndeterminate}
-                          disabled={groupItemKeys.length === 0}
-                          onChange={() => toggleGroupMediaSelection(groupItemKeys)}
-                          label={`Select all loaded items in ${group.title}`}
-                        />
-                      ) : null}
-                      <button
-                        className="video-group-toggle"
-                        onClick={() => toggleMediaGroup(group.key)}
-                      >
-                        <span>{isCollapsed ? "▶" : "▼"}</span>
-                        <span>
-                          {group.title} · {group.items.length} / {group.totalCount} items
-                          {selectionMode && selectedInGroupCount > 0 ? (
-                            <span className="video-group-select-count">
-                              {" "}· {selectedInGroupCount} / {groupItemKeys.length} selected
-                            </span>
-                          ) : null}
-                        </span>
-                      </button>
-                    </div>
-                    {!isCollapsed ? (
-                      <div className="video-grid video-grid-grouped">
-                        {group.items.map((item) => {
-                          const itemKey = getMediaItemKey(item);
-                          const isSelected = selectionMode && selectedMediaKeys.has(itemKey);
-                          const itemContent = (
-                            <>
-                              <div style={{ position: "relative" }}>
-                                {item.thumbnail_url ? (
-                                  <img
-                                    src={item.thumbnail_url}
-                                    alt={item.display_title}
-                                    className="thumb"
-                                    loading="lazy"
-                                    onError={(e) => {
-                                      e.currentTarget.style.visibility = "hidden";
-                                    }}
-                                  />
-                                ) : (
-                                  <div className="thumb-fallback">No thumbnail</div>
-                                )}
-                                {item.raw_format ? (
-                                  <span
-                                    style={{
-                                      position: "absolute",
-                                      top: 6,
-                                      left: 6,
-                                      background: "rgba(0,0,0,0.7)",
-                                      color: "#fff",
-                                      fontSize: 10,
-                                      fontWeight: 700,
-                                      padding: "2px 6px",
-                                      borderRadius: 4,
-                                      letterSpacing: 0.5,
-                                    }}
-                                  >
-                                    RAW
-                                  </span>
-                                ) : null}
-                                {selectionMode ? (
-                                  <label
-                                    className="video-select-checkbox"
-                                    onClick={(e) => e.stopPropagation()}
-                                    title={isSelected ? "Deselect" : "Select"}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={isSelected}
-                                      onChange={() => toggleMediaItem(itemKey)}
-                                    />
-                                  </label>
-                                ) : null}
-                              </div>
-                              <div className="overlay">
-                                <div className="top-row">
-                                  <span className="title" style={{ maxWidth: "100%" }}>
-                                    {item.display_title}
-                                  </span>
-                                </div>
-                                <div className="meta-row">
-                                  <span>{item.type === "video" ? "Video" : "Photo"}</span>
-                                  <span>{item.extension}</span>
-                                </div>
-                              </div>
-                            </>
-                          );
-
-                          return (
-                            selectionMode ? (
-                              <button
-                                key={`${item.type}-${item.id}`}
-                                type="button"
-                                className={`video-card compact${selectionMode ? " video-card-selection-mode" : ""}${isSelected ? " video-card-selected" : ""}`}
-                                onClick={() => toggleMediaItem(itemKey)}
-                                title={item.display_title}
-                              >
-                                {itemContent}
-                              </button>
-                            ) : item.type === "video" ? (
-                              <button
-                                key={`${item.type}-${item.id}`}
-                                type="button"
-                                className="video-card compact"
-                                onClick={() => navigate(`/watch/${item.id}`)}
-                                title={item.display_title}
-                              >
-                                {itemContent}
-                              </button>
-                            ) : (
-                              <a
-                                key={`${item.type}-${item.id}`}
-                                className="video-card compact"
-                                href={`/photo/${item.id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={item.display_title}
-                              >
-                                {itemContent}
-                              </a>
-                            )
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </section>
-                );
-              })}
-              <div className="library-load-more-row">
-                <span className="library-load-more-count">Showing {totalVisibleMedia} of {mediaItems.length}</span>
-                {canLoadMoreMedia ? (
-                  <button className="btn-secondary" onClick={loadMoreVideos}>Load more</button>
-                ) : (
-                  <span className="library-load-more-done">All items loaded</span>
-                )}
-              </div>
-            </div>
-          )}
-        </>
+        <GroupedMediaBrowser
+          type={mode === "photos" ? "photo" : "all"}
+          groupBy={groupByForBrowser}
+          order={order}
+          search={search}
+          selectionMode={selectionMode}
+          selectedKeys={selectedMediaKeys}
+          onToggleItem={(item) => toggleMediaItem(getMediaItemKey(item))}
+          onToggleGroupItems={(items) => toggleGroupMediaSelection(items.map(getMediaItemKey))}
+          onItemsLoaded={handleItemsLoaded}
+          emptyMessage={
+            mode === "photos"
+              ? "No photos found. Add a Photo or Mixed source and run a scan."
+              : "No media found."
+          }
+        />
       )}
 
       <TagSelectorDialog

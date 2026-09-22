@@ -611,6 +611,104 @@ button {
   white-space: nowrap;
 }
 
+/* ── Lazy grouped media browser ─────────────────────────────────────────── */
+.grouped-media-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.grouped-media-year,
+.grouped-media-month {
+  display: flex;
+  flex-direction: column;
+}
+
+.grouped-media-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #2b2b2b;
+  padding: 8px 4px;
+  color: #b9c6d4;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.grouped-media-header:hover {
+  color: #e6edf3;
+}
+
+.grouped-media-year-header {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.grouped-media-month-header {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.grouped-media-caret {
+  flex-shrink: 0;
+  width: 14px;
+  color: #66a9e8;
+}
+
+.grouped-media-label {
+  flex: 1;
+}
+
+.grouped-media-count {
+  font-size: 12px;
+  color: #8899aa;
+  font-weight: normal;
+}
+
+.grouped-media-children {
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.grouped-media-items {
+  padding: 6px 0 12px 18px;
+}
+
+.grouped-media-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+
+.grouped-media-loading {
+  padding: 10px 4px;
+  color: #8899aa;
+  font-size: 13px;
+}
+
+.infinite-scroll-sentinel {
+  width: 100%;
+  height: 1px;
+}
+
+.thumb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #1a1a1a;
+  color: #66707a;
+  font-size: 12px;
+}
+
 /* Info text inside the library menu (e.g. unsupported bulk action notice) */
 .library-menu-info {
   display: block;

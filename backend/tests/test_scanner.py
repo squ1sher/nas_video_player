@@ -493,3 +493,51 @@ def test_indexed_video_is_visible_before_scan_completion(tmp_path: Path, monkeyp
     assert not scan_thread.is_alive()
 
 
+
+
+def test_background_scan_auto_starts_photo_preparation(tmp_path: Path, monkeypatch) -> None:
+    """After a successful background scan, photo preparation is auto-triggered."""
+    setup_test_db(tmp_path)
+
+    from app import scanner
+    from app.scanner import ScanResult
+
+    monkeypatch.setattr(scanner, "scan_video_library", lambda db, settings: ScanResult())
+
+    calls: list[bool] = []
+
+    def _fake_prepare(db, settings, **kwargs):
+        calls.append(True)
+        return {"status": "skipped", "job_id": None, "reason": "No photos need preparation."}
+
+    monkeypatch.setattr(
+        "app.services.photo_prepare_service.start_prepare_missing", _fake_prepare
+    )
+
+    scanner.scan_video_library_background(_build_settings(tmp_path))
+
+    assert calls == [True]
+
+
+def test_cancelled_background_scan_does_not_start_photo_preparation(tmp_path: Path, monkeypatch) -> None:
+    """A cancelled scan must not auto-trigger photo preparation."""
+    setup_test_db(tmp_path)
+
+    from app import scanner
+    from app.scanner import ScanResult
+
+    monkeypatch.setattr(scanner, "scan_video_library", lambda db, settings: ScanResult(cancelled=True))
+
+    calls: list[bool] = []
+
+    def _fake_prepare(db, settings, **kwargs):
+        calls.append(True)
+        return {"status": "skipped", "job_id": None, "reason": "x"}
+
+    monkeypatch.setattr(
+        "app.services.photo_prepare_service.start_prepare_missing", _fake_prepare
+    )
+
+    scanner.scan_video_library_background(_build_settings(tmp_path))
+
+    assert calls == []

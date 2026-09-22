@@ -262,9 +262,9 @@ def _dedupe_root_configs(configs: list[dict[str, object]]) -> list[dict[str, obj
         if normalized_path in seen_paths:
             continue
         seen_paths.add(normalized_path)
-        media_type = str(config.get("media_type") or "video").strip().lower() or "video"
+        media_type = str(config.get("media_type") or "mixed").strip().lower() or "mixed"
         if media_type not in ALLOWED_MEDIA_TYPES:
-            media_type = "video"
+            media_type = "mixed"
         result.append(
             {
                 "name": str(config.get("name") or DEFAULT_LIBRARY_ROOT_NAME).strip() or DEFAULT_LIBRARY_ROOT_NAME,
@@ -300,7 +300,7 @@ def _root_configs_from_env(settings: Settings) -> list[dict[str, object]]:
                 {
                     "name": f"Library {index + 1}" if len(paths) > 1 else DEFAULT_LIBRARY_ROOT_NAME,
                     "path": path,
-                    "media_type": "video",
+                    "media_type": "mixed",
                     "enabled": True,
                     "recursive": True,
                     "scan_priority": 100 + index * 10,

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import LibraryRoot, Video
+from app.models import LibraryRoot, Photo, Video
 from app.scan_status import get_scan_state
 from app.schemas import (
     LibraryRootIn,
@@ -30,7 +30,7 @@ ALLOWED_MEDIA_TYPES = {"video", "photo", "mixed"}
 
 
 def _normalize_media_type(raw: str | None) -> str:
-    value = (raw or "video").strip().lower() or "video"
+    value = (raw or "mixed").strip().lower() or "mixed"
     if value not in ALLOWED_MEDIA_TYPES:
         raise HTTPException(
             status_code=422,
@@ -44,11 +44,13 @@ def _normalize_media_type(raw: str | None) -> str:
 
 def _enrich_root_out(
     root: LibraryRoot,
-    video_count: int,
     settings: Settings,
+    db: Session,
 ) -> LibraryRootOut:
-    """Build a LibraryRootOut with computed relative_path and display_path."""
+    """Build a LibraryRootOut with computed relative_path, display_path and media counts."""
     p = Path(root.path)
+    video_count = db.query(Video).filter(Video.library_root_id == root.id).count()
+    photo_count = db.query(Photo).filter(Photo.media_source_id == root.id).count()
     return LibraryRootOut(
         id=root.id,
         name=root.name,
@@ -65,6 +67,7 @@ def _enrich_root_out(
         created_at=root.created_at,
         updated_at=root.updated_at,
         video_count=video_count,
+        photo_count=photo_count,
     )
 
 
@@ -83,7 +86,7 @@ def list_media_sources(
         .all()
     )
     return [
-        _enrich_root_out(root, db.query(Video).filter(Video.library_root_id == root.id).count(), settings)
+        _enrich_root_out(root, settings, db)
         for root in roots
     ]
 
@@ -158,7 +161,7 @@ def create_media_source(
     db.add(root)
     db.commit()
     db.refresh(root)
-    return _enrich_root_out(root, 0, settings)
+    return _enrich_root_out(root, settings, db)
 
 
 @router.get("/media-sources/{source_id}", response_model=LibraryRootOut)
@@ -171,8 +174,7 @@ def get_media_source(
     root = db.query(LibraryRoot).filter(LibraryRoot.id == source_id).first()
     if not root:
         raise HTTPException(status_code=404, detail="Media source not found.")
-    video_count = db.query(Video).filter(Video.library_root_id == root.id).count()
-    return _enrich_root_out(root, video_count, settings)
+    return _enrich_root_out(root, settings, db)
 
 
 @router.put("/media-sources/{source_id}", response_model=LibraryRootOut)
@@ -219,8 +221,7 @@ def update_media_source(
 
     db.commit()
     db.refresh(root)
-    video_count = db.query(Video).filter(Video.library_root_id == root.id).count()
-    return _enrich_root_out(root, video_count, settings)
+    return _enrich_root_out(root, settings, db)
 
 
 @router.delete("/media-sources/{source_id}")

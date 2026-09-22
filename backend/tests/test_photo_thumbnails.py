@@ -241,7 +241,12 @@ def test_media_all_mode_photo_urls_correct(tmp_path: Path) -> None:
 
 
 def test_unprepared_existing_jpg_returns_visible_placeholder(tmp_path: Path) -> None:
-    """Photo endpoints do not prepare synchronously; they return placeholders until the prepare service runs."""
+    """A standard photo with unreadable bytes falls back to a visible placeholder.
+
+    Endpoints now attempt on-demand derivative generation for standard photos,
+    but when the source bytes are not a decodable image, generation fails and a
+    placeholder PNG is returned instead of erroring.
+    """
     setup_test_db(tmp_path)
     client = make_client(tmp_path)
 
@@ -430,5 +435,131 @@ def test_raw_photo_thumbnail_endpoint_can_generate_on_demand(tmp_path: Path, mon
         assert photo is not None
         assert photo.thumbnail_status == "ready"
         assert photo.thumbnail_path == f"photos/{photo_id}.jpg"
+    finally:
+        db.close()
+
+
+def test_standard_photo_thumbnail_endpoint_generates_on_demand(tmp_path: Path, monkeypatch) -> None:
+    """GET /thumbnail generates a thumbnail on demand for a standard (non-RAW) photo."""
+    setup_test_db(tmp_path)
+    client = make_client(tmp_path)
+
+    from app.database import SessionLocal
+    from app.models import Photo
+
+    source = tmp_path / "std-thumb.jpg"
+    source.write_bytes(b"jpg-bytes")
+
+    db = SessionLocal()
+    try:
+        photo_id = _add_photo(
+            db,
+            media_source_id=None,
+            relative_path="std-thumb.jpg",
+            internal_path=str(source),
+            display_path="/volume1/std-thumb.jpg",
+            filename="std-thumb.jpg",
+            extension=".jpg",
+            file_size=source.stat().st_size,
+            captured_at=datetime.now(timezone.utc),
+            date_source="file_modified",
+            raw_format=False,
+            scan_status="indexed",
+            thumbnail_status="pending",
+            preview_status="pending",
+        )
+    finally:
+        db.close()
+
+    class _Result:
+        def __init__(self, path: Path | None, error: str | None = None) -> None:
+            self.path = path
+            self.error = error
+
+    def _fake_thumb(_photo_path: Path, thumbnails_dir: Path, photo_id_arg: int) -> _Result:
+        out = thumbnails_dir / "photos" / f"{photo_id_arg}.jpg"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"std-thumb")
+        return _Result(out)
+
+    called = {"raw": False}
+
+    def _fake_raw_thumb(*_args, **_kwargs) -> _Result:
+        called["raw"] = True
+        return _Result(None, "should not be called")
+
+    monkeypatch.setattr("app.routes.photos.generate_photo_thumbnail", _fake_thumb)
+    monkeypatch.setattr("app.routes.photos.generate_raw_thumbnail", _fake_raw_thumb)
+
+    response = client.get(f"/api/photos/{photo_id}/thumbnail")
+    assert response.status_code == 200
+    assert response.content == b"std-thumb"
+    assert called["raw"] is False
+
+    db = SessionLocal()
+    try:
+        photo = db.query(Photo).filter(Photo.id == photo_id).first()
+        assert photo is not None
+        assert photo.thumbnail_status == "ready"
+        assert photo.thumbnail_path == f"photos/{photo_id}.jpg"
+    finally:
+        db.close()
+
+
+def test_standard_photo_preview_endpoint_generates_on_demand(tmp_path: Path, monkeypatch) -> None:
+    """GET /preview generates a preview on demand for a standard (non-RAW) photo."""
+    setup_test_db(tmp_path)
+    client = make_client(tmp_path)
+
+    from app.database import SessionLocal
+    from app.models import Photo
+
+    source = tmp_path / "std-preview.jpg"
+    source.write_bytes(b"jpg-bytes")
+
+    db = SessionLocal()
+    try:
+        photo_id = _add_photo(
+            db,
+            media_source_id=None,
+            relative_path="std-preview.jpg",
+            internal_path=str(source),
+            display_path="/volume1/std-preview.jpg",
+            filename="std-preview.jpg",
+            extension=".jpg",
+            file_size=source.stat().st_size,
+            captured_at=datetime.now(timezone.utc),
+            date_source="file_modified",
+            raw_format=False,
+            scan_status="indexed",
+            thumbnail_status="pending",
+            preview_status="pending",
+        )
+    finally:
+        db.close()
+
+    class _Result:
+        def __init__(self, path: Path | None, error: str | None = None) -> None:
+            self.path = path
+            self.error = error
+
+    def _fake_preview(_photo_path: Path, thumbnails_dir: Path, photo_id_arg: int) -> _Result:
+        out = thumbnails_dir / "photos" / f"{photo_id_arg}_preview.jpg"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"std-preview")
+        return _Result(out)
+
+    monkeypatch.setattr("app.routes.photos.generate_photo_preview", _fake_preview)
+
+    response = client.get(f"/api/photos/{photo_id}/preview")
+    assert response.status_code == 200
+    assert response.content == b"std-preview"
+
+    db = SessionLocal()
+    try:
+        photo = db.query(Photo).filter(Photo.id == photo_id).first()
+        assert photo is not None
+        assert photo.preview_status == "ready"
+        assert photo.preview_path == f"photos/{photo_id}_preview.jpg"
     finally:
         db.close()

@@ -160,7 +160,7 @@ def _prepared_preview_file(photo: Photo, settings: Settings) -> Path | None:
     return _prepared_thumbnail_file(photo, settings)
 
 
-def _ensure_raw_photo_derivatives(
+def _ensure_photo_derivatives(
     db: Session,
     photo: Photo,
     settings: Settings,
@@ -168,17 +168,25 @@ def _ensure_raw_photo_derivatives(
     need_thumbnail: bool = False,
     need_preview: bool = False,
 ) -> None:
-    if not (photo.raw_format or is_raw_photo_file(Path(photo.internal_path))):
-        return
+    """Generate missing thumbnail/preview derivatives on demand for any photo.
 
+    Handles both RAW formats (via rawpy) and standard formats (JPG, PNG, WebP,
+    HEIC, ...) so that photos display even when the background prepare service
+    has not processed them yet.
+    """
     photo_path = resolve_photo_original_path(photo)
     if not photo_path.exists() or not photo_path.is_file():
         return
 
+    is_raw = bool(photo.raw_format) or is_raw_photo_file(Path(photo.internal_path))
+
     updated = False
 
     if need_thumbnail and not _prepared_thumbnail_file(photo, settings):
-        thumb_result = generate_raw_thumbnail(photo_path, settings.thumbnails_path, photo.id)
+        if is_raw:
+            thumb_result = generate_raw_thumbnail(photo_path, settings.thumbnails_path, photo.id)
+        else:
+            thumb_result = generate_photo_thumbnail(photo_path, settings.thumbnails_path, photo.id)
         if thumb_result.path is not None:
             photo.thumbnail_path = str(thumb_result.path.relative_to(settings.thumbnails_path).as_posix())
             photo.thumbnail_status = "ready"
@@ -186,7 +194,10 @@ def _ensure_raw_photo_derivatives(
             updated = True
 
     if need_preview and not _prepared_preview_file(photo, settings):
-        preview_result = generate_raw_preview(photo_path, settings.thumbnails_path, photo.id)
+        if is_raw:
+            preview_result = generate_raw_preview(photo_path, settings.thumbnails_path, photo.id)
+        else:
+            preview_result = generate_photo_preview(photo_path, settings.thumbnails_path, photo.id)
         if preview_result.path is not None:
             photo.preview_path = str(preview_result.path.relative_to(settings.thumbnails_path).as_posix())
             photo.preview_status = "ready"
@@ -212,8 +223,8 @@ def get_photo_thumbnail(
 ) -> Response:
     photo = _photo_or_404(db, photo_id)
     thumbnail_file = _prepared_thumbnail_file(photo, settings)
-    if thumbnail_file is None and photo.raw_format:
-        _ensure_raw_photo_derivatives(db, photo, settings, need_thumbnail=True)
+    if thumbnail_file is None:
+        _ensure_photo_derivatives(db, photo, settings, need_thumbnail=True)
         thumbnail_file = _prepared_thumbnail_file(photo, settings)
     if thumbnail_file is not None:
         return FileResponse(thumbnail_file)
@@ -238,8 +249,8 @@ def get_photo_preview(
     """
     photo = _photo_or_404(db, photo_id)
     preview_file = _prepared_preview_file(photo, settings)
-    if preview_file is None and photo.raw_format:
-        _ensure_raw_photo_derivatives(db, photo, settings, need_preview=True)
+    if preview_file is None:
+        _ensure_photo_derivatives(db, photo, settings, need_preview=True)
         preview_file = _prepared_preview_file(photo, settings)
     if preview_file is not None:
         return FileResponse(preview_file)

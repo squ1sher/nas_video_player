@@ -14,7 +14,7 @@ class LibraryRoot(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     path: Mapped[str] = mapped_column(String(2048), nullable=False, unique=True)
-    media_type: Mapped[str] = mapped_column(String(32), nullable=False, default="video")
+    media_type: Mapped[str] = mapped_column(String(32), nullable=False, default="mixed")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     recursive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     scan_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)

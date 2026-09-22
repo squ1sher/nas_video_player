@@ -253,3 +253,66 @@ def test_raw_prepare_failure_becomes_placeholder(tmp_path: Path, monkeypatch) ->
         assert photo.prepare_status == "placeholder"
     finally:
         db.close()
+
+def test_prepare_heic_uses_standard_photo_path(tmp_path: Path, monkeypatch) -> None:
+    """A HEIC photo is prepared via the standard (non-RAW) generators, not the RAW path."""
+    setup_test_db(tmp_path)
+    client = make_client(tmp_path)
+
+    from app.database import SessionLocal
+    from app.models import Photo
+
+    db = SessionLocal()
+    try:
+        photo_id = _add_photo(db, tmp_path, filename="IMG_1234.heic")
+    finally:
+        db.close()
+
+    class _Result:
+        def __init__(self, path: Path | None, error: str | None = None) -> None:
+            self.path = path
+            self.error = error
+
+    def _fake_thumb(_photo_path: Path, thumbnails_dir: Path, photo_id_arg: int) -> _Result:
+        out = thumbnails_dir / "photos" / f"{photo_id_arg}.jpg"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"heic-thumb")
+        return _Result(out)
+
+    def _fake_preview(_photo_path: Path, thumbnails_dir: Path, photo_id_arg: int) -> _Result:
+        out = thumbnails_dir / "photos" / f"{photo_id_arg}_preview.jpg"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"heic-preview")
+        return _Result(out)
+
+    raw_called = {"value": False}
+
+    def _fake_raw(*_args, **_kwargs) -> _Result:
+        raw_called["value"] = True
+        return _Result(None, "raw path should not be used for HEIC")
+
+    monkeypatch.setattr("app.services.photo_prepare_service.generate_photo_thumbnail", _fake_thumb)
+    monkeypatch.setattr("app.services.photo_prepare_service.generate_photo_preview", _fake_preview)
+    monkeypatch.setattr("app.services.photo_prepare_service.generate_raw_thumbnail", _fake_raw)
+    monkeypatch.setattr("app.services.photo_prepare_service.generate_raw_preview", _fake_raw)
+
+    response = client.post("/api/photos/prepare/selected", json={"photo_ids": [photo_id], "force": True})
+    assert response.status_code == 202
+    status = _wait_for_terminal_status(client)
+    assert status["status"] == "completed"
+    assert status["succeeded"] == 1
+    assert raw_called["value"] is False
+
+    db = SessionLocal()
+    try:
+        photo = db.query(Photo).filter(Photo.id == photo_id).first()
+        assert photo is not None
+        assert photo.thumbnail_status == "ready"
+        assert photo.preview_status == "ready"
+        assert photo.prepare_status == "ready"
+    finally:
+        db.close()
+
+    thumb = client.get(f"/api/photos/{photo_id}/thumbnail")
+    assert thumb.status_code == 200
+    assert thumb.content == b"heic-thumb"

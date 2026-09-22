@@ -755,12 +755,15 @@ def scan_video_library(db: Session, settings: Settings) -> ScanResult:
             db.commit()
             continue
 
-        effective_media_type = (root_record.media_type or "video").strip().lower() or "video"
+        # Media sources are no longer scanned by category. Every source scans
+        # all files (photos + videos); items are classified/grouped by their
+        # detected type. The stored media_type is kept only for reference.
+        effective_media_type = "mixed"
         logger.info(
-            "Scanning root: %s (id=%s, media_type=%s, recursive=%s)",
+            "Scanning root: %s (id=%s, media_type=%s→mixed, recursive=%s)",
             root_path,
             root_record.id,
-            effective_media_type,
+            (root_record.media_type or "mixed"),
             root_record.recursive,
         )
         cancelled = _scan_root_files(
@@ -866,6 +869,20 @@ def scan_video_library_background(settings: Settings) -> None:
                 mark_duplicates_outdated(db)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to mark duplicates as outdated after scan: %s", exc)
+
+            # Automatically prewarm photo thumbnails/previews after a successful scan
+            # so newly-indexed photos (JPG, HEIC, RAW, ...) display without a manual step.
+            try:
+                from app.services.photo_prepare_service import start_prepare_missing
+
+                prepare_result = start_prepare_missing(db, settings)
+                logger.info(
+                    "Auto photo preparation after scan: status=%s reason=%s",
+                    prepare_result.get("status"),
+                    prepare_result.get("reason"),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to auto-start photo preparation after scan: %s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Background scan failed: %s", exc)
         fail_scan(str(exc))

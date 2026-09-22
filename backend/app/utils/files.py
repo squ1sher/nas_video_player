@@ -2,7 +2,7 @@ import mimetypes
 from pathlib import Path
 
 VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm", ".mpg", ".mpeg", ".360"}
-PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".tif", ".tiff"}
+PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".tif", ".tiff"}
 RAW_PHOTO_EXTENSIONS = {".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".rw2"}
 IMAGE_EXTENSIONS = PHOTO_EXTENSIONS | RAW_PHOTO_EXTENSIONS
 MIME_OVERRIDES = {
@@ -15,6 +15,8 @@ MIME_OVERRIDES = {
     ".mpg": "video/mpeg",
     ".mpeg": "video/mpeg",
     ".360": "application/octet-stream",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
 }
 
 

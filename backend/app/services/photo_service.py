@@ -19,6 +19,14 @@ except Exception:  # noqa: BLE001
     class UnidentifiedImageError(Exception):
         pass
 
+# Register HEIF/HEIC support so Pillow can open .heic/.heif files (iPhone photos).
+try:
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+except Exception:  # noqa: BLE001
+    logging.getLogger(__name__).info("pillow-heif unavailable: HEIC/HEIF photos will not be decoded")
+
 try:
     import rawpy
 except ImportError:  # noqa: BLE001

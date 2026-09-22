@@ -828,7 +828,7 @@ def test_audio_extensions_skipped_quickly(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_image_extensions_skipped_quickly(tmp_path: Path, monkeypatch) -> None:
-    """Video sources ignore image files without probing."""
+    """Image files are scanned as photos (not video-probed) regardless of source type."""
     setup_test_db(tmp_path)
     root = tmp_path / "videos" / "image_test"
     root.mkdir(parents=True)
@@ -848,14 +848,17 @@ def test_image_extensions_skipped_quickly(tmp_path: Path, monkeypatch) -> None:
     from app.database import SessionLocal
     from app.scanner import scan_video_library
     from app.config import get_settings
+    from app.models import Photo
 
     db = SessionLocal()
     _add_root(db, root, name="Image Test")
     result = scan_video_library(db, get_settings())
+    photo_count = db.query(Photo).count()
     db.close()
 
-    assert len(probe_called) == 0, "Image files should not be probed"
-    assert result.ignored_non_media == 5
+    assert len(probe_called) == 0, "Image files should not be video-probed"
+    assert photo_count == 5, "All image files should be scanned as photos"
+    assert result.ignored_non_media == 0
 
 
 
