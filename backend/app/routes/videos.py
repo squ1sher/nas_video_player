@@ -1,4 +1,5 @@
 import logging
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,8 +14,14 @@ from app.config import Settings, get_settings
 from app.database import get_db
 from app.media_probe import probe_video
 from app.models import DuplicateCandidateItem, HlsJob, LibraryRoot, MediaProfile, PlaylistItem, Video, VideoTag, VideoVariant, WatchProgress
-from app.schemas import VideoBulkDeleteIn, VideoBulkDeleteOut, VideoDetail, VideoListItem, VideoTagAssignIn, VideoTagOut
-from app.services.library_root_service import resolve_video_source_path
+from app.schemas import MediaMoveIn, VideoBulkDeleteIn, VideoBulkDeleteOut, VideoDetail, VideoListItem, VideoTagAssignIn, VideoTagOut
+from app.services.library_root_service import (
+    compute_relative_folder_path,
+    find_library_root_for_path,
+    resolve_move_destination_path,
+    resolve_video_source_path,
+    validate_media_source_path,
+)
 from app.services.media_profile_service import (
     assign_profile_to_video,
     build_media_profile_fields,
@@ -24,7 +31,7 @@ from app.services.media_profile_service import (
 from app.services.playlist_service import remove_video_from_all_playlists
 from app.streaming import RangeError, iter_file_chunks, parse_range_header
 from app.services.tag_service import TagError, assign_video_tags, get_video_tags, get_video_tags_map, remove_video_tag
-from app.thumbnails import generate_thumbnail
+from app.thumbnails import build_thumbnail_name, generate_thumbnail
 from app.utils.files import IMAGE_EXTENSIONS, guess_mime_type, is_photo_extension
 
 logger = logging.getLogger(__name__)
@@ -385,6 +392,84 @@ def delete_video_tag(video_id: int, tag_id: int, db: Session = Depends(get_db)) 
     except TagError as exc:
         status_code = 404 if exc.code == "video_not_found" else 409
         raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+@router.post("/{video_id}/move", response_model=VideoDetail)
+def move_video(
+    video_id: int,
+    body: MediaMoveIn,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> VideoDetail:
+    """Move the source video file to a new folder, keeping its database id.
+
+    HLS/thumbnail derivatives are keyed by video id and are not stored next to the
+    source file, so streaming/download links keep working after a move. The
+    on-disk video thumbnail (keyed by relative path) is renamed to match.
+    """
+    video = get_video_or_404(db, video_id)
+    source_path = resolve_video_source_path(video, settings)
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Source file was not found on disk.")
+
+    try:
+        target_dir = resolve_move_destination_path(body.target_directory, settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    validation = validate_media_source_path(str(target_dir), settings)
+    if not validation.valid:
+        raise HTTPException(status_code=400, detail=validation.message)
+    if not os.access(target_dir, os.W_OK):
+        raise HTTPException(status_code=409, detail=f"Destination folder is not writable: {target_dir}")
+
+    dest_path = (target_dir / video.filename).resolve(strict=False)
+    if dest_path == source_path.resolve(strict=False):
+        raise HTTPException(status_code=400, detail="Destination is the same as the current location.")
+    if dest_path.exists():
+        raise HTTPException(
+            status_code=409,
+            detail=f"A file named '{video.filename}' already exists in the destination folder.",
+        )
+
+    new_root = find_library_root_for_path(db, dest_path)
+    if new_root is None:
+        raise HTTPException(status_code=400, detail="Destination folder is not inside any configured media source.")
+
+    try:
+        shutil.move(str(source_path), str(dest_path))
+    except OSError as exc:
+        logger.warning("Failed to move video id=%s to %s: %s", video.id, dest_path, exc)
+        raise HTTPException(status_code=409, detail=f"Failed to move file: {exc}") from exc
+
+    root_path = Path(new_root.path).expanduser().resolve(strict=False)
+    new_relative_path = dest_path.relative_to(root_path).as_posix()
+    new_folder_path = compute_relative_folder_path(dest_path, root_path)
+
+    old_thumbnail_name = video.thumbnail_path
+    video.absolute_path = str(dest_path)
+    video.relative_path = new_relative_path
+    video.folder_path = new_folder_path
+    video.library_root_id = new_root.id
+
+    if old_thumbnail_name:
+        new_thumbnail_name = build_thumbnail_name(new_relative_path)
+        if new_thumbnail_name != old_thumbnail_name:
+            old_thumb_path = settings.thumbnails_path / old_thumbnail_name
+            new_thumb_path = settings.thumbnails_path / new_thumbnail_name
+            if old_thumb_path.exists():
+                try:
+                    new_thumb_path.parent.mkdir(parents=True, exist_ok=True)
+                    old_thumb_path.rename(new_thumb_path)
+                    video.thumbnail_path = new_thumbnail_name
+                except OSError as exc:
+                    logger.warning("Failed to rename thumbnail after moving video id=%s: %s", video.id, exc)
+
+    db.commit()
+    db.refresh(video)
+
+    tags = get_video_tags_map(db, [video.id]).get(video.id, [])
+    return to_detail(video, _library_root_name_for_video(db, video), tags)
 
 
 @router.post("/{video_id}/reprobe", response_model=VideoDetail)

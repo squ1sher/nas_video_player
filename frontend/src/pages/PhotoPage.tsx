@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { fetchPhoto, getPhotoOriginalUrl } from "../api/client";
+import { fetchPhoto, getPhotoOriginalUrl, movePhoto } from "../api/client";
+import { MoveFileModal } from "../components/MoveFileModal";
 import type { PhotoDetail } from "../types/video";
 
 function formatBytes(bytes: number): string {
@@ -27,6 +28,8 @@ export function PhotoPage() {
   const [photo, setPhoto] = useState<PhotoDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -105,15 +108,32 @@ export function PhotoPage() {
             <div><strong>Camera:</strong> {[photo.camera_make, photo.camera_model].filter(Boolean).join(" ") || "-"}</div>
             <div><strong>Extension:</strong> {photo.extension}</div>
             <div><strong>Source:</strong> {photo.media_source_name || "Unassigned"}</div>
+            <div><strong>Path:</strong> {photo.display_path}</div>
             <div><strong>RAW:</strong> {photo.raw_format ? "Yes" : "No"}</div>
           </div>
-          <div style={{ marginTop: 12 }}>
+          {actionMessage && <div className="notice" style={{ marginTop: 12 }}>{actionMessage}</div>}
+          <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
             <a className="btn-primary" href={getPhotoOriginalUrl(photo.id)}>
               Download original
             </a>
+            <button className="btn-secondary" onClick={() => setMoveModalOpen(true)}>
+              Move file
+            </button>
           </div>
         </div>
       </div>
+
+      <MoveFileModal
+        open={moveModalOpen}
+        filename={photo.filename}
+        currentDisplayPath={photo.display_path}
+        onClose={() => setMoveModalOpen(false)}
+        onConfirm={async (targetDirectory) => {
+          const updated = await movePhoto(photo.id, targetDirectory);
+          setPhoto(updated);
+          setActionMessage(`Moved to: ${updated.relative_path}`);
+        }}
+      />
     </div>
   );
 }

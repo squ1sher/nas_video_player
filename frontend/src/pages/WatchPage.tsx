@@ -8,11 +8,13 @@ import {
   getVideoHlsStatus,
   getDownloadUrl,
   getProgress,
+  moveVideo,
   prepareVideoHls,
   regenerateThumbnail,
   reprobeVideo,
 } from "../api/client";
 import { CompatibilityBadge } from "../components/CompatibilityBadge";
+import { MoveFileModal } from "../components/MoveFileModal";
 import { VideoTagsPanel } from "../components/tags/VideoTagsPanel";
 import { VideoPlayer } from "../components/VideoPlayer";
 import type { VideoTag } from "../types/video";
@@ -115,6 +117,7 @@ export function WatchPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [reprobeBusy, setReprobeBusy] = useState(false);
   const [thumbnailBusy, setThumbnailBusy] = useState(false);
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [playbackSource, setPlaybackSource] = useState<PlaybackSource | null>(null);
   const [hlsStatus, setHlsStatus] = useState<HlsVideoStatus | null>(null);
@@ -432,6 +435,13 @@ export function WatchPage() {
     }
   };
 
+  const handleMoveConfirm = async (targetDirectory: string) => {
+    if (!video) return;
+    const updated = await moveVideo(video.id, targetDirectory);
+    setVideo(updated);
+    setActionMessage(`Moved to: ${updated.relative_path}`);
+  };
+
   const handlePrepareHls = async () => {
     if (!video) return;
     try {
@@ -488,11 +498,22 @@ export function WatchPage() {
           <button className="btn-secondary" onClick={handleRegenerateThumbnail} disabled={thumbnailBusy || reprobeBusy}>
             {thumbnailBusy ? "Regenerating..." : "Regenerate thumbnail"}
           </button>
+          <button className="btn-secondary" onClick={() => setMoveModalOpen(true)}>
+            Move file
+          </button>
           <button className="btn-danger" onClick={handleDelete} disabled={deleteBusy}>
             {deleteBusy ? "Deleting..." : "Delete"}
           </button>
         </div>
       </div>
+
+      <MoveFileModal
+        open={moveModalOpen}
+        filename={video.filename}
+        currentDisplayPath=""
+        onClose={() => setMoveModalOpen(false)}
+        onConfirm={handleMoveConfirm}
+      />
 
       {actionMessage && <div className="notice">{actionMessage}</div>}
       {playlistContext ? (

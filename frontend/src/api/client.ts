@@ -699,6 +699,26 @@ export async function regenerateThumbnail(videoId: number): Promise<VideoDetail>
   );
 }
 
+export async function moveVideo(videoId: number, targetDirectory: string): Promise<VideoDetail> {
+  return handleResponse<VideoDetail>(
+    await fetch(`${API_BASE}/videos/${videoId}/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_directory: targetDirectory }),
+    })
+  );
+}
+
+export async function movePhoto(photoId: number, targetDirectory: string): Promise<PhotoDetail> {
+  return handleResponse<PhotoDetail>(
+    await fetch(`${API_BASE}/photos/${photoId}/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_directory: targetDirectory }),
+    })
+  );
+}
+
 // ── Settings – Media Sources ───────────────────────────────────────────────
 
 export async function browseMediaSources(relativePath = ""): Promise<MediaSourceBrowseItem[]> {

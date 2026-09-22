@@ -745,6 +745,12 @@ class MediaSourceBrowseItem(BaseModel):
     blocked: bool
 
 
+class MediaMoveIn(BaseModel):
+    # Destination folder. Accepts a host-style path (e.g. "/volume1/sclad/Movies"),
+    # a container path (e.g. "/media/sclad/Movies"), or a path relative to the media root.
+    target_directory: str
+
+
 class PhotoOut(BaseModel):
     id: int
     media_source_id: int | None = None

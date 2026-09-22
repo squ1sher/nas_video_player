@@ -1,5 +1,8 @@
 from pathlib import Path
 from datetime import datetime, timezone
+import logging
+import os
+import shutil
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
@@ -9,12 +12,19 @@ from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import LibraryRoot, Photo
 from app.schemas import (
+    MediaMoveIn,
     PhotoDetailOut,
     PhotoPrepareMissingIn,
     PhotoPrepareSelectedIn,
     PhotoPrepareStartOut,
     PhotoPrepareStatusOut,
     PhotoPrepareSummaryOut,
+)
+from app.services.library_root_service import (
+    find_library_root_for_path,
+    path_to_display,
+    resolve_move_destination_path,
+    validate_media_source_path,
 )
 from app.services.photo_prepare_service import (
     cancel_prepare_job,
@@ -33,6 +43,7 @@ from app.services.photo_service import (
 )
 from app.utils.files import guess_mime_type, is_raw_photo_file
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/photos", tags=["photos"])
 
 
@@ -140,6 +151,65 @@ def get_photo(photo_id: int, db: Session = Depends(get_db)) -> PhotoDetailOut:
         root = db.query(LibraryRoot).filter(LibraryRoot.id == photo.media_source_id).first()
         source_name = root.name if root else None
     return _photo_detail(photo, source_name)
+
+
+@router.post("/{photo_id}/move", response_model=PhotoDetailOut)
+def move_photo(
+    photo_id: int,
+    body: MediaMoveIn,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> PhotoDetailOut:
+    """Move the source photo file to a new folder, keeping its database id.
+
+    Thumbnails/previews are keyed by photo id (not by path), so they never need
+    to move and their links keep working after a move.
+    """
+    photo = _photo_or_404(db, photo_id)
+    source_path = resolve_photo_original_path(photo)
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Source file was not found on disk.")
+
+    try:
+        target_dir = resolve_move_destination_path(body.target_directory, settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    validation = validate_media_source_path(str(target_dir), settings)
+    if not validation.valid:
+        raise HTTPException(status_code=400, detail=validation.message)
+    if not os.access(target_dir, os.W_OK):
+        raise HTTPException(status_code=409, detail=f"Destination folder is not writable: {target_dir}")
+
+    dest_path = (target_dir / photo.filename).resolve(strict=False)
+    if dest_path == source_path.resolve(strict=False):
+        raise HTTPException(status_code=400, detail="Destination is the same as the current location.")
+    if dest_path.exists():
+        raise HTTPException(
+            status_code=409,
+            detail=f"A file named '{photo.filename}' already exists in the destination folder.",
+        )
+
+    new_root = find_library_root_for_path(db, dest_path)
+    if new_root is None:
+        raise HTTPException(status_code=400, detail="Destination folder is not inside any configured media source.")
+
+    try:
+        shutil.move(str(source_path), str(dest_path))
+    except OSError as exc:
+        logger.warning("Failed to move photo id=%s to %s: %s", photo.id, dest_path, exc)
+        raise HTTPException(status_code=409, detail=f"Failed to move file: {exc}") from exc
+
+    root_path = Path(new_root.path).expanduser().resolve(strict=False)
+    photo.internal_path = str(dest_path)
+    photo.display_path = path_to_display(dest_path, settings)
+    photo.relative_path = dest_path.relative_to(root_path).as_posix()
+    photo.media_source_id = new_root.id
+
+    db.commit()
+    db.refresh(photo)
+
+    return _photo_detail(photo, new_root.name)
 
 
 def _prepared_thumbnail_file(photo: Photo, settings: Settings) -> Path | None:

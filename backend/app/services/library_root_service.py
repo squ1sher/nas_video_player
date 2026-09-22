@@ -248,6 +248,60 @@ def browse_media_sources(
     return entries
 
 
+# ── Move / relocate helpers ─────────────────────────────────────────────────
+
+
+def resolve_move_destination_path(raw_path: str, settings: Settings) -> Path:
+    """Convert a user-supplied destination into an absolute container path.
+
+    Accepts a host-style path (e.g. "/volume1/sclad/Movies"), an already-absolute
+    container path (e.g. "/media/sclad/Movies"), or a path relative to the media
+    root (e.g. "sclad/Movies"). Does not check whether the path exists.
+    """
+    raw = raw_path.strip()
+    if not raw:
+        raise ValueError("Target directory is required.")
+
+    media_base = _resolve_media_base(settings)
+    if raw == _HOST_DISPLAY_ROOT or raw.startswith(_HOST_DISPLAY_ROOT + "/"):
+        rel = raw[len(_HOST_DISPLAY_ROOT):].lstrip("/")
+        candidate = media_base / rel if rel else media_base
+    elif raw.startswith("/"):
+        candidate = Path(raw)
+    else:
+        candidate = media_base / raw
+
+    return candidate.expanduser().resolve(strict=False)
+
+
+def find_library_root_for_path(db: Session, path: Path) -> LibraryRoot | None:
+    """Return the library root whose directory contains *path* (deepest match wins)."""
+    resolved = path.resolve(strict=False)
+    best: LibraryRoot | None = None
+    best_depth = -1
+    for root in db.query(LibraryRoot).all():
+        try:
+            root_path = Path(root.path).expanduser().resolve(strict=False)
+        except OSError:
+            continue
+        try:
+            resolved.relative_to(root_path)
+        except ValueError:
+            continue
+        depth = len(root_path.parts)
+        if depth > best_depth:
+            best = root
+            best_depth = depth
+    return best
+
+
+def compute_relative_folder_path(file_path: Path, root: Path) -> str:
+    """Return the folder path of *file_path* relative to *root* (""  at root level)."""
+    parent_relative = file_path.parent.resolve(strict=False).relative_to(root.resolve(strict=False))
+    folder = parent_relative.as_posix()
+    return "" if folder == "." else folder
+
+
 # ── Bootstrap from environment variables ──────────────────────────────────
 
 
