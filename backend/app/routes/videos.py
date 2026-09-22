@@ -18,6 +18,7 @@ from app.schemas import MediaMoveIn, VideoBulkDeleteIn, VideoBulkDeleteOut, Vide
 from app.services.library_root_service import (
     compute_relative_folder_path,
     find_library_root_for_path,
+    next_available_path,
     resolve_move_destination_path,
     resolve_video_source_path,
     validate_media_source_path,
@@ -427,10 +428,22 @@ def move_video(
     if dest_path == source_path.resolve(strict=False):
         raise HTTPException(status_code=400, detail="Destination is the same as the current location.")
     if dest_path.exists():
-        raise HTTPException(
-            status_code=409,
-            detail=f"A file named '{video.filename}' already exists in the destination folder.",
-        )
+        if body.on_conflict == "keep_both":
+            dest_path = next_available_path(dest_path)
+        elif body.on_conflict == "overwrite":
+            try:
+                dest_path.unlink()
+            except OSError as exc:
+                raise HTTPException(status_code=409, detail=f"Failed to overwrite existing file: {exc}") from exc
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "file_exists",
+                    "message": f"A file named '{video.filename}' already exists in the destination folder.",
+                    "suggested_name": next_available_path(dest_path).name,
+                },
+            )
 
     new_root = find_library_root_for_path(db, dest_path)
     if new_root is None:
@@ -450,6 +463,7 @@ def move_video(
     video.absolute_path = str(dest_path)
     video.relative_path = new_relative_path
     video.folder_path = new_folder_path
+    video.filename = dest_path.name
     video.library_root_id = new_root.id
 
     if old_thumbnail_name:

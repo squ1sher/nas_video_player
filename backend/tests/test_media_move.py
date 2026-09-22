@@ -114,6 +114,50 @@ def test_move_video_rejects_existing_destination_file(tmp_path: Path) -> None:
 
     response = client.post(f"/api/videos/{video_id}/move", json={"target_directory": str(dest_dir)})
     assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "file_exists"
+    assert detail["suggested_name"] == "sample (1).mp4"
+
+
+def test_move_video_keep_both_appends_index(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    root_id, root_dir = _make_library_root(tmp_path, name="Movies", subdir="videos/movies")
+    video_id = _make_video(root_dir, root_id)
+
+    dest_dir = root_dir / "subfolder"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    (dest_dir / "sample.mp4").write_bytes(b"already-here")
+
+    response = client.post(
+        f"/api/videos/{video_id}/move",
+        json={"target_directory": str(dest_dir), "on_conflict": "keep_both"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["relative_path"] == "subfolder/sample (1).mp4"
+    assert (dest_dir / "sample.mp4").read_bytes() == b"already-here"
+    assert (dest_dir / "sample (1).mp4").exists()
+    assert not (root_dir / "sample.mp4").exists()
+
+
+def test_move_video_overwrite_replaces_existing_file(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    root_id, root_dir = _make_library_root(tmp_path, name="Movies", subdir="videos/movies")
+    video_id = _make_video(root_dir, root_id)
+
+    dest_dir = root_dir / "subfolder"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    (dest_dir / "sample.mp4").write_bytes(b"stale-content")
+
+    response = client.post(
+        f"/api/videos/{video_id}/move",
+        json={"target_directory": str(dest_dir), "on_conflict": "overwrite"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["relative_path"] == "subfolder/sample.mp4"
+    assert (dest_dir / "sample.mp4").read_bytes() == b"fake-media-content"
+    assert not (root_dir / "sample.mp4").exists()
 
 
 def test_move_video_rejects_destination_outside_any_root(tmp_path: Path) -> None:
@@ -143,3 +187,40 @@ def test_move_photo_updates_paths(tmp_path: Path) -> None:
 
     assert (dest_dir / "photo.jpg").exists()
     assert not (root_dir / "photo.jpg").exists()
+
+
+def test_create_folder_under_media_source(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    _root_id, root_dir = _make_library_root(tmp_path, name="Movies", subdir="videos/movies")
+
+    response = client.post(
+        "/api/settings/media-sources/create-folder",
+        json={"parent_directory": str(root_dir), "folder_name": "New Folder"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["name"] == "New Folder"
+    assert (root_dir / "New Folder").is_dir()
+
+
+def test_create_folder_rejects_existing_name(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    _root_id, root_dir = _make_library_root(tmp_path, name="Movies", subdir="videos/movies")
+    (root_dir / "Existing").mkdir()
+
+    response = client.post(
+        "/api/settings/media-sources/create-folder",
+        json={"parent_directory": str(root_dir), "folder_name": "Existing"},
+    )
+    assert response.status_code == 400
+
+
+def test_create_folder_rejects_path_separators(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    _root_id, root_dir = _make_library_root(tmp_path, name="Movies", subdir="videos/movies")
+
+    response = client.post(
+        "/api/settings/media-sources/create-folder",
+        json={"parent_directory": str(root_dir), "folder_name": "../escape"},
+    )
+    assert response.status_code == 400

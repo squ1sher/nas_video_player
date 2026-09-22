@@ -128,8 +128,8 @@ export function PhotoPage() {
         filename={photo.filename}
         currentDisplayPath={photo.display_path}
         onClose={() => setMoveModalOpen(false)}
-        onConfirm={async (targetDirectory) => {
-          const updated = await movePhoto(photo.id, targetDirectory);
+        onConfirm={async (targetDirectory, onConflict) => {
+          const updated = await movePhoto(photo.id, targetDirectory, onConflict);
           setPhoto(updated);
           setActionMessage(`Moved to: ${updated.relative_path}`);
         }}

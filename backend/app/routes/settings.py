@@ -13,6 +13,7 @@ from app.schemas import (
     LibraryRootIn,
     LibraryRootOut,
     LibraryRootUpdate,
+    MediaCreateFolderIn,
     MediaSourceBrowseItem,
     PathValidationRequest,
     PathValidationResult,
@@ -20,6 +21,7 @@ from app.schemas import (
 )
 from app.services.library_root_service import (
     browse_media_sources,
+    create_media_subfolder,
     path_to_display,
     path_to_relative,
     validate_media_source_path,
@@ -117,6 +119,37 @@ def browse_directories(
         )
         for e in entries
     ]
+
+
+@router.post("/media-sources/create-folder", response_model=MediaSourceBrowseItem)
+def create_folder(
+    body: MediaCreateFolderIn,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+) -> MediaSourceBrowseItem:
+    """Create a new subfolder under an existing, allowed media directory.
+
+    Used by the move-file destination picker so users aren't limited to
+    already-existing folders when relocating a file.
+    """
+    try:
+        new_dir = create_media_subfolder(body.parent_directory, body.folder_name, settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    existing_paths = {
+        Path(path_str).resolve(strict=False).as_posix()
+        for (path_str,) in db.query(LibraryRoot).with_entities(LibraryRoot.path).all()
+    }
+    return MediaSourceBrowseItem(
+        name=new_dir.name,
+        relative_path=path_to_relative(new_dir, settings),
+        internal_path=str(new_dir),
+        display_path=path_to_display(new_dir, settings),
+        is_directory=True,
+        already_added=new_dir.resolve(strict=False).as_posix() in existing_paths,
+        blocked=False,
+    )
 
 
 @router.post("/media-sources/validate", response_model=PathValidationResult)

@@ -302,6 +302,52 @@ def compute_relative_folder_path(file_path: Path, root: Path) -> str:
     return "" if folder == "." else folder
 
 
+def next_available_path(dest_path: Path) -> Path:
+    """Return a sibling path with an incrementing "(n)" suffix that does not exist yet.
+
+    e.g. "movie.mp4" -> "movie (1).mp4" -> "movie (2).mp4", ...
+    Used for the "keep both" conflict resolution when moving a file onto an
+    existing filename.
+    """
+    parent = dest_path.parent
+    stem = dest_path.stem
+    suffix = dest_path.suffix
+    index = 1
+    while True:
+        candidate = parent / f"{stem} ({index}){suffix}"
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def create_media_subfolder(parent_dir_str: str, folder_name: str, settings: Settings) -> Path:
+    """Create a new subdirectory under an existing, allowed media directory.
+
+    Validates the parent directory the same way move/browse destinations are
+    validated, rejects unsafe folder names (path separators, "..", empty), and
+    fails if the folder already exists.
+    """
+    name = folder_name.strip()
+    if not name:
+        raise ValueError("Folder name is required.")
+    if "/" in name or "\\" in name or name in (".", ".."):
+        raise ValueError("Folder name cannot contain path separators.")
+
+    parent_dir = resolve_move_destination_path(parent_dir_str, settings)
+    validation = validate_media_source_path(str(parent_dir), settings)
+    if not validation.valid:
+        raise ValueError(validation.message)
+    if not os.access(parent_dir, os.W_OK):
+        raise ValueError(f"Parent folder is not writable: {parent_dir}")
+
+    new_dir = (parent_dir / name).resolve(strict=False)
+    if new_dir.exists():
+        raise ValueError(f"A folder named '{name}' already exists.")
+
+    new_dir.mkdir(parents=False, exist_ok=False)
+    return new_dir
+
+
 # ── Bootstrap from environment variables ──────────────────────────────────
 
 

@@ -22,6 +22,7 @@ from app.schemas import (
 )
 from app.services.library_root_service import (
     find_library_root_for_path,
+    next_available_path,
     path_to_display,
     resolve_move_destination_path,
     validate_media_source_path,
@@ -185,10 +186,22 @@ def move_photo(
     if dest_path == source_path.resolve(strict=False):
         raise HTTPException(status_code=400, detail="Destination is the same as the current location.")
     if dest_path.exists():
-        raise HTTPException(
-            status_code=409,
-            detail=f"A file named '{photo.filename}' already exists in the destination folder.",
-        )
+        if body.on_conflict == "keep_both":
+            dest_path = next_available_path(dest_path)
+        elif body.on_conflict == "overwrite":
+            try:
+                dest_path.unlink()
+            except OSError as exc:
+                raise HTTPException(status_code=409, detail=f"Failed to overwrite existing file: {exc}") from exc
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "file_exists",
+                    "message": f"A file named '{photo.filename}' already exists in the destination folder.",
+                    "suggested_name": next_available_path(dest_path).name,
+                },
+            )
 
     new_root = find_library_root_for_path(db, dest_path)
     if new_root is None:
@@ -204,6 +217,7 @@ def move_photo(
     photo.internal_path = str(dest_path)
     photo.display_path = path_to_display(dest_path, settings)
     photo.relative_path = dest_path.relative_to(root_path).as_posix()
+    photo.filename = dest_path.name
     photo.media_source_id = new_root.id
 
     db.commit()

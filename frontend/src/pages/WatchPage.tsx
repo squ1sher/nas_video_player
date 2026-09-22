@@ -435,9 +435,9 @@ export function WatchPage() {
     }
   };
 
-  const handleMoveConfirm = async (targetDirectory: string) => {
+  const handleMoveConfirm = async (targetDirectory: string, onConflict: "fail" | "overwrite" | "keep_both") => {
     if (!video) return;
-    const updated = await moveVideo(video.id, targetDirectory);
+    const updated = await moveVideo(video.id, targetDirectory, onConflict);
     setVideo(updated);
     setActionMessage(`Moved to: ${updated.relative_path}`);
   };

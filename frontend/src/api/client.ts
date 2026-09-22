@@ -699,24 +699,74 @@ export async function regenerateThumbnail(videoId: number): Promise<VideoDetail>
   );
 }
 
-export async function moveVideo(videoId: number, targetDirectory: string): Promise<VideoDetail> {
-  return handleResponse<VideoDetail>(
-    await fetch(`${API_BASE}/videos/${videoId}/move`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target_directory: targetDirectory }),
-    })
-  );
+export type MoveConflictResolution = "fail" | "overwrite" | "keep_both";
+
+export class MoveConflictError extends Error {
+  code = "file_exists" as const;
+  suggestedName: string;
+
+  constructor(message: string, suggestedName: string) {
+    super(message);
+    this.name = "MoveConflictError";
+    this.suggestedName = suggestedName;
+  }
 }
 
-export async function movePhoto(photoId: number, targetDirectory: string): Promise<PhotoDetail> {
-  return handleResponse<PhotoDetail>(
-    await fetch(`${API_BASE}/photos/${photoId}/move`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target_directory: targetDirectory }),
-    })
-  );
+async function postMoveRequest<T>(
+  url: string,
+  targetDirectory: string,
+  onConflict: MoveConflictResolution
+): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target_directory: targetDirectory, on_conflict: onConflict }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    let detail: unknown = null;
+    try {
+      detail = JSON.parse(text)?.detail;
+    } catch {
+      // keep detail null, fall back to raw text below
+    }
+    if (
+      response.status === 409 &&
+      detail &&
+      typeof detail === "object" &&
+      (detail as { code?: string }).code === "file_exists"
+    ) {
+      const conflict = detail as { message?: string; suggested_name?: string };
+      throw new MoveConflictError(
+        conflict.message || "A file with that name already exists in the destination folder.",
+        conflict.suggested_name || ""
+      );
+    }
+    let message = text || `Request failed with status ${response.status}`;
+    if (typeof detail === "string") {
+      message = detail;
+    } else if (detail && typeof (detail as { message?: unknown }).message === "string") {
+      message = (detail as { message: string }).message;
+    }
+    throw new Error(message);
+  }
+  return (await response.json()) as T;
+}
+
+export async function moveVideo(
+  videoId: number,
+  targetDirectory: string,
+  onConflict: MoveConflictResolution = "fail"
+): Promise<VideoDetail> {
+  return postMoveRequest<VideoDetail>(`${API_BASE}/videos/${videoId}/move`, targetDirectory, onConflict);
+}
+
+export async function movePhoto(
+  photoId: number,
+  targetDirectory: string,
+  onConflict: MoveConflictResolution = "fail"
+): Promise<PhotoDetail> {
+  return postMoveRequest<PhotoDetail>(`${API_BASE}/photos/${photoId}/move`, targetDirectory, onConflict);
 }
 
 // ── Settings – Media Sources ───────────────────────────────────────────────
@@ -727,6 +777,19 @@ export async function browseMediaSources(relativePath = ""): Promise<MediaSource
   params.set("t", String(Date.now()));
   return handleResponse<MediaSourceBrowseItem[]>(
     await fetch(`${API_BASE}/settings/media-sources/browse?${params}`, { cache: "no-store" })
+  );
+}
+
+export async function createMediaFolder(
+  parentDirectory: string,
+  folderName: string
+): Promise<MediaSourceBrowseItem> {
+  return handleResponse<MediaSourceBrowseItem>(
+    await fetch(`${API_BASE}/settings/media-sources/create-folder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parent_directory: parentDirectory, folder_name: folderName }),
+    })
   );
 }
 

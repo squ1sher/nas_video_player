@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -749,6 +749,19 @@ class MediaMoveIn(BaseModel):
     # Destination folder. Accepts a host-style path (e.g. "/volume1/sclad/Movies"),
     # a container path (e.g. "/media/sclad/Movies"), or a path relative to the media root.
     target_directory: str
+    # How to resolve a filename collision at the destination:
+    #   "fail"       – reject with a 409 "file_exists" conflict (default; client should
+    #                  then ask the user and resubmit with "overwrite" or "keep_both")
+    #   "overwrite"  – replace the existing file at the destination
+    #   "keep_both"  – append an incrementing " (n)" suffix to the moved file's name
+    on_conflict: Literal["fail", "overwrite", "keep_both"] = "fail"
+
+
+class MediaCreateFolderIn(BaseModel):
+    # Existing parent directory in which to create the new subfolder. Accepts the
+    # same path forms as MediaMoveIn.target_directory.
+    parent_directory: str
+    folder_name: str
 
 
 class PhotoOut(BaseModel):

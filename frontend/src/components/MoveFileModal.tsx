@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { browseMediaSources } from "../api/client";
+import { browseMediaSources, createMediaFolder, MoveConflictError } from "../api/client";
+import type { MoveConflictResolution } from "../api/client";
 import type { MediaSourceBrowseItem } from "../types/video";
 
 type MoveFileModalProps = {
@@ -8,13 +9,16 @@ type MoveFileModalProps = {
   filename: string;
   currentDisplayPath: string;
   onClose: () => void;
-  onConfirm: (targetDirectory: string) => Promise<void>;
+  onConfirm: (targetDirectory: string, onConflict: MoveConflictResolution) => Promise<void>;
 };
 
 /**
  * Modal for relocating a video/photo's source file. Lets the user type a
  * destination path directly, or browse the media library visually (reusing
- * the same directory browser used by Settings → Media Sources).
+ * the same directory browser used by Settings → Media Sources), including
+ * creating a brand-new subfolder. If the destination already has a file with
+ * the same name, the user is asked whether to overwrite it or keep both
+ * (the moved file gets an incrementing " (n)" suffix).
  */
 export function MoveFileModal({ open, filename, currentDisplayPath, onClose, onConfirm }: MoveFileModalProps) {
   const [targetPath, setTargetPath] = useState("");
@@ -23,15 +27,22 @@ export function MoveFileModal({ open, filename, currentDisplayPath, onClose, onC
   const [browseItems, setBrowseItems] = useState<MediaSourceBrowseItem[]>([]);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browseError, setBrowseError] = useState<string | null>(null);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [folderBusy, setFolderBusy] = useState(false);
   const [moving, setMoving] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<{ message: string; suggestedName: string } | null>(null);
 
   useEffect(() => {
     if (open) {
       const currentDir = currentDisplayPath.split("/").slice(0, -1).join("/") || "/volume1";
       setTargetPath(currentDir);
       setMoveError(null);
+      setConflict(null);
       setBrowseOpen(false);
+      setCreatingFolder(false);
+      setNewFolderName("");
     }
   }, [open, currentDisplayPath]);
 
@@ -81,21 +92,51 @@ export function MoveFileModal({ open, filename, currentDisplayPath, onClose, onC
     setBrowseOpen(false);
   };
 
+  const handleCreateFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    setFolderBusy(true);
+    setBrowseError(null);
+    try {
+      const parentDisplay = browsePath ? `/volume1/${browsePath}` : "/volume1";
+      const created = await createMediaFolder(parentDisplay, name);
+      setNewFolderName("");
+      setCreatingFolder(false);
+      await loadBrowse(browsePath);
+      // Jump straight into the newly created folder for convenience.
+      setBrowsePath(created.relative_path);
+      await loadBrowse(created.relative_path);
+    } catch (e) {
+      setBrowseError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFolderBusy(false);
+    }
+  };
+
+  const attemptMove = async (onConflict: MoveConflictResolution) => {
+    setMoving(true);
+    setMoveError(null);
+    try {
+      await onConfirm(targetPath.trim(), onConflict);
+      onClose();
+    } catch (e) {
+      if (e instanceof MoveConflictError) {
+        setConflict({ message: e.message, suggestedName: e.suggestedName });
+        return;
+      }
+      setMoveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMoving(false);
+    }
+  };
+
   const handleMove = async () => {
     if (!targetPath.trim()) {
       setMoveError("Please enter or select a destination folder.");
       return;
     }
-    setMoving(true);
-    setMoveError(null);
-    try {
-      await onConfirm(targetPath.trim());
-      onClose();
-    } catch (e) {
-      setMoveError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setMoving(false);
-    }
+    setConflict(null);
+    await attemptMove("fail");
   };
 
   return (
@@ -126,6 +167,23 @@ export function MoveFileModal({ open, filename, currentDisplayPath, onClose, onC
 
           {moveError && <div className="error" style={{ marginTop: 8 }}>{moveError}</div>}
 
+          {conflict && (
+            <div className="notice" style={{ marginTop: 8 }}>
+              <p style={{ marginTop: 0 }}>{conflict.message}</p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn-secondary" onClick={() => void attemptMove("overwrite")} disabled={moving}>
+                  Overwrite
+                </button>
+                <button className="btn-secondary" onClick={() => void attemptMove("keep_both")} disabled={moving}>
+                  Keep both{conflict.suggestedName ? ` (as "${conflict.suggestedName}")` : ""}
+                </button>
+                <button className="btn-secondary" onClick={() => setConflict(null)} disabled={moving}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           {browseOpen && (
             <div style={{ border: "1px solid var(--border-color, #444)", borderRadius: 6, padding: 8, marginTop: 8 }}>
               <div className="browse-breadcrumb">
@@ -148,10 +206,27 @@ export function MoveFileModal({ open, filename, currentDisplayPath, onClose, onC
                 })}
               </div>
 
-              <div style={{ display: "flex", gap: 8, margin: "6px 0" }}>
+              <div style={{ display: "flex", gap: 8, margin: "6px 0", flexWrap: "wrap" }}>
                 {browsePath && <button className="btn-sm browse-up-btn" onClick={() => void handleBrowseUp()}>↑ Up</button>}
                 <button className="btn-sm" onClick={handleUseCurrentFolder}>Use this folder</button>
+                <button className="btn-sm" onClick={() => setCreatingFolder((v) => !v)}>+ New folder</button>
               </div>
+
+              {creatingFolder && (
+                <div style={{ display: "flex", gap: 8, margin: "6px 0" }}>
+                  <input
+                    type="text"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    placeholder="New folder name"
+                    style={{ flex: 1 }}
+                    disabled={folderBusy}
+                  />
+                  <button className="btn-sm" onClick={() => void handleCreateFolder()} disabled={folderBusy || !newFolderName.trim()}>
+                    {folderBusy ? "Creating..." : "Create"}
+                  </button>
+                </div>
+              )}
 
               {browseLoading && <div className="settings-loading">Loading...</div>}
               {browseError && <div className="settings-error">{browseError}</div>}
@@ -183,7 +258,7 @@ export function MoveFileModal({ open, filename, currentDisplayPath, onClose, onC
         </div>
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onClose} disabled={moving}>Cancel</button>
-          <button className="btn-primary" onClick={() => void handleMove()} disabled={moving}>
+          <button className="btn-primary" onClick={() => void handleMove()} disabled={moving || !!conflict}>
             {moving ? "Moving..." : "Move file"}
           </button>
         </div>
@@ -191,3 +266,4 @@ export function MoveFileModal({ open, filename, currentDisplayPath, onClose, onC
     </div>
   );
 }
+
