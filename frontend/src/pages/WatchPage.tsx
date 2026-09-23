@@ -246,14 +246,17 @@ export function WatchPage() {
       const isFull = !!(document.fullscreenElement && playerContainerRef.current?.contains(document.fullscreenElement));
       setIsFullscreen(isFull);
 
-      // If user entered fullscreen on the <video> itself (not our container),
-      // redirect to the container so our overlay is also in fullscreen.
+      // If user entered fullscreen on the <video> itself (e.g. via the
+      // browser's native fullscreen button, not our container), swap the
+      // fullscreen element to the container so our overlay is shown too.
+      // We're already inside an active fullscreen session at this point, so
+      // requesting fullscreen on another element works without needing a
+      // fresh user gesture (unlike calling exitFullscreen() first, which can
+      // cause the follow-up requestFullscreen() to be silently rejected).
       if (document.fullscreenElement && playerContainerRef.current &&
           document.fullscreenElement !== playerContainerRef.current &&
           playerContainerRef.current.contains(document.fullscreenElement)) {
-        document.exitFullscreen()
-          .then(() => playerContainerRef.current?.requestFullscreen())
-          .catch(() => {});
+        playerContainerRef.current.requestFullscreen().catch(() => {});
       }
     };
     document.addEventListener("fullscreenchange", handler);
@@ -637,21 +640,6 @@ export function WatchPage() {
             </button>
           </div>
         ) : null}
-
-        {/* Custom fullscreen toggle */}
-        <button
-          className="player-fullscreen-btn"
-          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-          onClick={() => {
-            if (document.fullscreenElement) {
-              document.exitFullscreen().catch(() => {});
-            } else {
-              playerContainerRef.current?.requestFullscreen().catch(() => {});
-            }
-          }}
-        >
-          {isFullscreen ? "⤡" : "⤢"}
-        </button>
       </div>
 
       {video.media_status === "probe_failed_possible_video" && (

@@ -1608,29 +1608,6 @@ button.video-card {
   font-size: 18px;
 }
 
-/* Custom fullscreen toggle button */
-.player-fullscreen-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  background: rgba(0, 0, 0, 0.55);
-  border: none;
-  color: #fff;
-  font-size: 18px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  z-index: 20;
-  line-height: 1;
-}
-
-.player-container:hover .player-fullscreen-btn,
-.player-container:fullscreen .player-fullscreen-btn {
-  opacity: 1;
-}
-
 /* Fullscreen: video fills the container */
 .player-container:fullscreen .video-player {
   width: 100%;
