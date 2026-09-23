@@ -8,7 +8,9 @@ import {
 } from "../../api/client";
 import type { SortOrder } from "../../api/client";
 import type { MediaGroup, UnifiedMediaItem } from "../../types/video";
+import type { JumpNavItem } from "../CollectionJumpNav";
 import { GroupCheckbox } from "../GroupCheckbox";
+import { GroupToggleHeader } from "../GroupToggleHeader";
 import { InfiniteScrollSentinel } from "./InfiniteScrollSentinel";
 import { MediaCard, mediaItemKey } from "./MediaCard";
 
@@ -38,6 +40,10 @@ type Props = {
   onToggleGroupItems: (items: UnifiedMediaItem[]) => void;
   onItemsLoaded?: (items: UnifiedMediaItem[]) => void;
   emptyMessage?: string;
+  /** Notifies the parent of the current top-level groups (for the jump nav). */
+  onGroupsChange?: (items: JumpNavItem[]) => void;
+  /** Bump this value to collapse every expanded group. */
+  collapseAllSignal?: number;
 };
 
 function isUnknownYear(group: MediaGroup): boolean {
@@ -64,6 +70,11 @@ function parseBucket(groupKey: string): string | undefined {
   return groupKey.split(":")[1];
 }
 
+/** DOM id used as a scroll target for the collection jump nav. */
+function groupDomId(groupKey: string): string {
+  return `group-anchor-${groupKey.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
 export function GroupedMediaBrowser(props: Props) {
   const {
     type,
@@ -82,6 +93,8 @@ export function GroupedMediaBrowser(props: Props) {
     onToggleGroupItems,
     onItemsLoaded,
     emptyMessage = "No media found.",
+    onGroupsChange,
+    collapseAllSignal,
   } = props;
 
   const baseFilters = useMemo<MediaGroupFilters>(
@@ -114,6 +127,24 @@ export function GroupedMediaBrowser(props: Props) {
 
   const onItemsLoadedRef = useRef(onItemsLoaded);
   onItemsLoadedRef.current = onItemsLoaded;
+
+  const onGroupsChangeRef = useRef(onGroupsChange);
+  onGroupsChangeRef.current = onGroupsChange;
+
+  // Notify the parent of the current top-level groups whenever they change,
+  // so it can render jump-nav links for them.
+  useEffect(() => {
+    onGroupsChangeRef.current?.(
+      topGroups.map((group) => ({ id: groupDomId(group.group_key), label: group.label }))
+    );
+  }, [topGroups]);
+
+  // Collapse every expanded group when the parent bumps collapseAllSignal.
+  useEffect(() => {
+    if (collapseAllSignal === undefined) return;
+    setExpanded(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapseAllSignal]);
 
   // Load top-level group summaries whenever filters change.
   useEffect(() => {
@@ -318,12 +349,14 @@ export function GroupedMediaBrowser(props: Props) {
           const months = monthsByYear.get(group.group_key) ?? [];
           const loadingMonths = monthsLoading.has(group.group_key);
           return (
-            <section key={group.group_key} className="grouped-media-year">
-              <button className="grouped-media-header grouped-media-year-header" onClick={() => toggleYear(group)}>
-                <span className="grouped-media-caret">{isOpen ? "▼" : "▶"}</span>
-                <span className="grouped-media-label">{group.label}</span>
-                <span className="grouped-media-count">{group.count.toLocaleString()}</span>
-              </button>
+            <section key={group.group_key} id={groupDomId(group.group_key)} className="grouped-media-year">
+              <GroupToggleHeader
+                expanded={isOpen}
+                onToggle={() => toggleYear(group)}
+                label={group.label}
+                count={group.count.toLocaleString()}
+                size="lg"
+              />
               {isOpen ? (
                 <div className="grouped-media-children">
                   {loadingMonths ? <div className="grouped-media-loading">Loading...</div> : null}
@@ -331,14 +364,13 @@ export function GroupedMediaBrowser(props: Props) {
                     const monthOpen = expanded.has(month.group_key);
                     return (
                       <section key={month.group_key} className="grouped-media-month">
-                        <button
-                          className="grouped-media-header grouped-media-month-header"
-                          onClick={() => toggleLeaf(month.group_key)}
-                        >
-                          <span className="grouped-media-caret">{monthOpen ? "▼" : "▶"}</span>
-                          <span className="grouped-media-label">{month.label}</span>
-                          <span className="grouped-media-count">{month.count.toLocaleString()}</span>
-                        </button>
+                        <GroupToggleHeader
+                          expanded={monthOpen}
+                          onToggle={() => toggleLeaf(month.group_key)}
+                          label={month.label}
+                          count={month.count.toLocaleString()}
+                          size="md"
+                        />
                         {monthOpen ? (
                           <div className="grouped-media-items">{renderLeafBody(month.group_key)}</div>
                         ) : null}
@@ -353,15 +385,14 @@ export function GroupedMediaBrowser(props: Props) {
 
         // Leaf-style group: bucket, or unknown-date year.
         return (
-          <section key={group.group_key} className="grouped-media-month grouped-media-leaf">
-            <button
-              className="grouped-media-header grouped-media-month-header"
-              onClick={() => (isYear ? toggleYear(group) : toggleLeaf(group.group_key))}
-            >
-              <span className="grouped-media-caret">{isOpen ? "▼" : "▶"}</span>
-              <span className="grouped-media-label">{group.label}</span>
-              <span className="grouped-media-count">{group.count.toLocaleString()}</span>
-            </button>
+          <section key={group.group_key} id={groupDomId(group.group_key)} className="grouped-media-month grouped-media-leaf">
+            <GroupToggleHeader
+              expanded={isOpen}
+              onToggle={() => (isYear ? toggleYear(group) : toggleLeaf(group.group_key))}
+              label={group.label}
+              count={group.count.toLocaleString()}
+              size="md"
+            />
             {isOpen ? <div className="grouped-media-items">{renderLeafBody(group.group_key)}</div> : null}
           </section>
         );

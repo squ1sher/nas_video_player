@@ -11,7 +11,9 @@ import {
   updatePlaylist,
 } from "../api/client";
 import type { SortField, SortOrder } from "../api/client";
+import { CollectionJumpNav } from "../components/CollectionJumpNav";
 import { GroupCheckbox } from "../components/GroupCheckbox";
+import { GroupToggleHeader } from "../components/GroupToggleHeader";
 import { InfiniteScrollSentinel } from "../components/media/InfiniteScrollSentinel";
 import { SearchBar } from "../components/SearchBar";
 import { VideoCard } from "../components/VideoCard";
@@ -415,6 +417,15 @@ export function PlaylistDetailPage() {
     });
   };
 
+  const collapseAllGroups = () => {
+    setCollapsedGroups(new Set(groupedItems.map((group) => group.key)));
+  };
+
+  const jumpNavItems = useMemo(
+    () => (groupedItems.length > 1 ? visibleGroups.map((group) => ({ id: `playlist-group-${group.key}`, label: group.title })) : []),
+    [groupedItems, visibleGroups]
+  );
+
   // ─── Sort ─────────────────────────────────────────────────────────────────
 
   const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -775,6 +786,7 @@ export function PlaylistDetailPage() {
       {/* ── Normal gallery view ────────────────────────────────────────────── */}
       {!reorderMode ? (
         <>
+          <CollectionJumpNav items={jumpNavItems} onCollapseAll={groupedItems.length > 1 ? collapseAllGroups : undefined} />
           {filteredItems.length === 0 ? (
             <div className="status">
               {playlist.item_count === 0
@@ -796,34 +808,36 @@ export function PlaylistDetailPage() {
                   selectedInGroupCount > 0 && selectedInGroupCount < groupVideoIds.length;
 
                 return (
-                  <section key={group.key} className="video-group-section">
+                  <section key={group.key} id={`playlist-group-${group.key}`} className="video-group-section">
                     {/* Show group header only when there are multiple groups */}
                     {groupedItems.length > 1 ? (
-                      <div className="video-group-header">
-                        {selectionMode ? (
-                          <GroupCheckbox
-                            checked={groupChecked}
-                            indeterminate={groupIndeterminate}
-                            disabled={groupVideoIds.length === 0}
-                            onChange={() => toggleGroupVideoSelection(groupVideoIds)}
-                            label={`Select all loaded items in ${group.title}`}
-                          />
-                        ) : null}
-                        <button
-                          className="video-group-toggle"
-                          onClick={() => toggleGroup(group.key)}
-                        >
-                          <span>{collapsedGroups.has(group.key) ? "▶" : "▼"}</span>
-                          <span>
-                            {group.title} – {group.videos.length} / {group.totalCount} videos
+                      <GroupToggleHeader
+                        expanded={!collapsedGroups.has(group.key)}
+                        onToggle={() => toggleGroup(group.key)}
+                        leading={
+                          selectionMode ? (
+                            <GroupCheckbox
+                              checked={groupChecked}
+                              indeterminate={groupIndeterminate}
+                              disabled={groupVideoIds.length === 0}
+                              onChange={() => toggleGroupVideoSelection(groupVideoIds)}
+                              label={`Select all loaded items in ${group.title}`}
+                            />
+                          ) : undefined
+                        }
+                        label={
+                          <>
+                            {group.title}
                             {selectionMode && selectedInGroupCount > 0 ? (
                               <span className="video-group-select-count">
                                 {" "}· {selectedInGroupCount} / {groupVideoIds.length} selected
                               </span>
                             ) : null}
-                          </span>
-                        </button>
-                      </div>
+                          </>
+                        }
+                        count={`${group.videos.length} / ${group.totalCount} videos`}
+                        size="md"
+                      />
                     ) : null}
                     {!collapsedGroups.has(group.key) ? (
                       <div className="video-grid video-grid-grouped">

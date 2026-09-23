@@ -4,6 +4,7 @@ import type { SortField, SortOrder } from "../../api/client";
 import type { UnifiedMediaItem } from "../../types/video";
 import type { MediaFolderTreeNode } from "../../utils/buildMediaFolderTree";
 import { groupMediaItems } from "../../utils/groupMediaItems";
+import { GroupToggleHeader } from "../GroupToggleHeader";
 
 type Props = {
   root: MediaFolderTreeNode;
@@ -165,18 +166,18 @@ function PhotoFolderNode({
 
   return (
     <li className="folder-node" key={node.path}>
-      <div className="folder-row">
-        {canExpand ? (
-          <button className="folder-toggle" onClick={() => onToggle(node.path)}>{isExpanded ? "v" : ">"}</button>
-        ) : (
-          <span className="folder-toggle-placeholder" />
-        )}
-        <button className="folder-label" onClick={() => onToggle(node.path)}>
-          <span className="folder-node-icon">DIR</span>
-          <span className="folder-name">{node.name}</span>
-          <span className="folder-count">{folderMeta(node)}</span>
-        </button>
-      </div>
+      <GroupToggleHeader
+        expanded={isExpanded}
+        onToggle={() => onToggle(node.path)}
+        label={
+          <>
+            <span className="folder-node-icon">DIR</span>
+            <span className="folder-name">{node.name}</span>
+          </>
+        }
+        count={canExpand ? folderMeta(node) : undefined}
+        size="md"
+      />
 
       {isExpanded && (
         <div className="folder-children-wrap">
@@ -205,10 +206,13 @@ function PhotoFolderNode({
                 const isGroupCollapsed = collapsedGroups.has(groupRef);
                 return (
                   <section key={groupRef} className="video-group-section">
-                    <button className="video-group-header video-group-toggle" onClick={() => toggleGroup(groupRef)}>
-                      <span>{isGroupCollapsed ? ">" : "v"}</span>
-                      <span>{group.title} - {group.items.length} photos</span>
-                    </button>
+                    <GroupToggleHeader
+                      expanded={!isGroupCollapsed}
+                      onToggle={() => toggleGroup(groupRef)}
+                      label={group.title}
+                      count={`${group.items.length} photos`}
+                      size="md"
+                    />
                     {!isGroupCollapsed && (
                       <div className="video-grid video-grid-grouped">
                         {group.items.map((item) => (
@@ -266,10 +270,13 @@ export function PhotoFolderTree({
               const isGroupCollapsed = collapsedGroups.has(groupRef);
               return (
                 <section key={groupRef} className="video-group-section">
-                  <button className="video-group-header video-group-toggle" onClick={() => toggleGroup(groupRef)}>
-                    <span>{isGroupCollapsed ? ">" : "v"}</span>
-                    <span>{group.title} - {group.items.length} photos</span>
-                  </button>
+                  <GroupToggleHeader
+                    expanded={!isGroupCollapsed}
+                    onToggle={() => toggleGroup(groupRef)}
+                    label={group.title}
+                    count={`${group.items.length} photos`}
+                    size="md"
+                  />
                   {!isGroupCollapsed && (
                     <div className="video-grid video-grid-grouped">
                       {group.items.map((item) => (

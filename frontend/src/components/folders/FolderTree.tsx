@@ -5,6 +5,7 @@ import type { WatchProgress } from "../../types/video";
 import type { FolderTreeNode } from "../../utils/buildFolderTree";
 import { groupVideos } from "../../utils/groupVideos";
 import { FolderNode } from "./FolderNode";
+import { GroupToggleHeader } from "../GroupToggleHeader";
 import { VideoCard } from "../VideoCard";
 
 type Props = {
@@ -53,10 +54,13 @@ export function FolderTree({
               const isGroupCollapsed = collapsedGroups.has(groupRef);
               return (
                 <section key={groupRef} className="video-group-section">
-                  <button className="video-group-header video-group-toggle" onClick={() => toggleGroup(groupRef)}>
-                    <span>{isGroupCollapsed ? ">" : "v"}</span>
-                    <span>{group.title} - {group.videos.length} videos</span>
-                  </button>
+                  <GroupToggleHeader
+                    expanded={!isGroupCollapsed}
+                    onToggle={() => toggleGroup(groupRef)}
+                    label={group.title}
+                    count={`${group.videos.length} videos`}
+                    size="md"
+                  />
                   {!isGroupCollapsed && (
                     <div className="video-grid video-grid-grouped">
                       {group.videos.map((video) => (

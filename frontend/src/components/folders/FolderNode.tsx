@@ -4,6 +4,7 @@ import type { SortField, SortOrder } from "../../api/client";
 import type { WatchProgress } from "../../types/video";
 import type { FolderTreeNode } from "../../utils/buildFolderTree";
 import { groupVideos } from "../../utils/groupVideos";
+import { GroupToggleHeader } from "../GroupToggleHeader";
 import { VideoCard } from "../VideoCard";
 
 type Props = {
@@ -54,18 +55,18 @@ export function FolderNode({
 
   return (
     <li className="folder-node" key={node.path}>
-      <div className="folder-row">
-        {canExpand ? (
-          <button className="folder-toggle" onClick={() => onToggle(node.path)}>{isExpanded ? "v" : ">"}</button>
-        ) : (
-          <span className="folder-toggle-placeholder" />
-        )}
-        <button className="folder-label" onClick={() => onToggle(node.path)}>
-          <span className="folder-node-icon">DIR</span>
-          <span className="folder-name">{node.name}</span>
-          <span className="folder-count">{folderMeta(node)}</span>
-        </button>
-      </div>
+      <GroupToggleHeader
+        expanded={isExpanded}
+        onToggle={() => onToggle(node.path)}
+        label={
+          <>
+            <span className="folder-node-icon">DIR</span>
+            <span className="folder-name">{node.name}</span>
+          </>
+        }
+        count={canExpand ? folderMeta(node) : undefined}
+        size="md"
+      />
 
       {isExpanded && (
         <div className="folder-children-wrap">
@@ -95,10 +96,13 @@ export function FolderNode({
                 const isGroupCollapsed = collapsedGroups.has(groupRef);
                 return (
                   <section key={groupRef} className="video-group-section">
-                    <button className="video-group-header video-group-toggle" onClick={() => toggleGroup(groupRef)}>
-                      <span>{isGroupCollapsed ? ">" : "v"}</span>
-                      <span>{group.title} - {group.videos.length} videos</span>
-                    </button>
+                    <GroupToggleHeader
+                      expanded={!isGroupCollapsed}
+                      onToggle={() => toggleGroup(groupRef)}
+                      label={group.title}
+                      count={`${group.videos.length} videos`}
+                      size="md"
+                    />
                     {!isGroupCollapsed && (
                       <div className="video-grid video-grid-grouped">
                         {group.videos.map((video) => (

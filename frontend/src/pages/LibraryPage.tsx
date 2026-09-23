@@ -12,6 +12,8 @@ import {
 import type { MediaGroupBy, SortField, SortOrder } from "../api/client";
 import { SearchBar } from "../components/SearchBar";
 import { SortSelect } from "../components/SortSelect";
+import { CollectionJumpNav } from "../components/CollectionJumpNav";
+import type { JumpNavItem } from "../components/CollectionJumpNav";
 import { FolderTree } from "../components/folders/FolderTree";
 import { PhotoFolderTree } from "../components/folders/PhotoFolderTree";
 import { GroupedMediaBrowser } from "../components/media/GroupedMediaBrowser";
@@ -93,6 +95,8 @@ export function LibraryPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectedMediaKeys, setSelectedMediaKeys] = useState<Set<string>>(new Set());
   const [loadedItemsByKey, setLoadedItemsByKey] = useState<Map<string, UnifiedMediaItem>>(new Map());
+  const [browserJumpItems, setBrowserJumpItems] = useState<JumpNavItem[]>([]);
+  const [browserCollapseSignal, setBrowserCollapseSignal] = useState(0);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagFilterDialogOpen, setTagFilterDialogOpen] = useState(false);
   const [tagFilter, setTagFilter] = useState<TagFilterState>({ selectedTagIds: [], mode: "any", withoutTags: false });
@@ -211,6 +215,19 @@ export function LibraryPage() {
     }));
   }, [photoFolderSourceGroups]);
 
+  const folderJumpItems = useMemo<JumpNavItem[]>(
+    () => folderTrees.map((source) => ({ id: `folder-source-${source.key}`, label: source.name })),
+    [folderTrees]
+  );
+
+  const photoFolderJumpItems = useMemo<JumpNavItem[]>(
+    () => photoFolderTrees.map((source) => ({ id: `folder-source-${source.key}`, label: source.name })),
+    [photoFolderTrees]
+  );
+
+  const collapseAllFolders = () => setExpandedFolders(new Set());
+  const collapseAllPhotoFolders = () => setExpandedPhotoFolders(new Set());
+
   const loadFolderVideos = async () => {
     const data = await fetchVideos({
       sort,
@@ -289,6 +306,11 @@ export function LibraryPage() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // GroupedMediaBrowser jump-nav items only apply while it's mounted.
+  useEffect(() => {
+    setBrowserJumpItems([]);
+  }, [mode, tab]);
 
   useEffect(() => {
     if (!selectionMode) return;
@@ -543,25 +565,24 @@ export function LibraryPage() {
       ? `Selected: ${selectedVideos.length}`
       : `Selected: ${selectedMediaKeys.size}`;
 
+  const toggleTab = (value: Tab) => setTab((prev) => (prev === value ? "all" : value));
+
   return (
     <div className="page page-library-compact">
       <header className="library-compact-header">
-        <div className="library-title-mini">Library</div>
         <nav className="lib-tabs lib-tabs-compact">
           <button className={mode === "videos" ? "tab-btn active" : "tab-btn"} onClick={() => setMode("videos")}>Videos</button>
           <button className={mode === "photos" ? "tab-btn active" : "tab-btn"} onClick={() => setMode("photos")}>Photos</button>
           <button className={mode === "all" ? "tab-btn active" : "tab-btn"} onClick={() => setMode("all")}>All</button>
         </nav>
         {mode === "videos" ? (
-          <nav className="lib-tabs lib-tabs-compact">
-            <button className={tab === "all" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("all")}>All Videos</button>
-            <button className={tab === "folders" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("folders")}>Folders</button>
-            <button className={tab === "playlists" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("playlists")}>Playlists</button>
+          <nav className="lib-subtabs" aria-label="View">
+            <button className={tab === "folders" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("folders")}>Folders</button>
+            <button className={tab === "playlists" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("playlists")}>Playlists</button>
           </nav>
         ) : mode === "photos" ? (
-          <nav className="lib-tabs lib-tabs-compact">
-            <button className={tab === "all" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("all")}>All Photos</button>
-            <button className={tab === "folders" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("folders")}>Folders</button>
+          <nav className="lib-subtabs" aria-label="View">
+            <button className={tab === "folders" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("folders")}>Folders</button>
           </nav>
         ) : null}
         <div className="library-controls-compact">
@@ -666,29 +687,35 @@ export function LibraryPage() {
       {actionNotice && <div className="notice">{actionNotice}</div>}
 
       {mode === "videos" && tab === "all" && (
-        <GroupedMediaBrowser
-          type="video"
-          groupBy={groupByForBrowser}
-          order={order}
-          search={search}
-          tagIds={tagFilter.withoutTags ? undefined : tagFilter.selectedTagIds}
-          tagMode={tagFilter.mode}
-          withoutTags={tagFilter.withoutTags}
-          selectionMode={selectionMode}
-          selectedKeys={selectedMediaKeys}
-          onToggleItem={(item) => toggleMediaItem(getMediaItemKey(item))}
-          onToggleGroupItems={(items) => toggleGroupMediaSelection(items.map(getMediaItemKey))}
-          onItemsLoaded={handleItemsLoaded}
-          emptyMessage={
-            hasActiveTagFilter
-              ? "No videos match the selected tag filters."
-              : "No videos found. Add media sources in Settings and run a scan."
-          }
-        />
+        <>
+          <CollectionJumpNav items={browserJumpItems} onCollapseAll={() => setBrowserCollapseSignal((n) => n + 1)} />
+          <GroupedMediaBrowser
+            type="video"
+            groupBy={groupByForBrowser}
+            order={order}
+            search={search}
+            tagIds={tagFilter.withoutTags ? undefined : tagFilter.selectedTagIds}
+            tagMode={tagFilter.mode}
+            withoutTags={tagFilter.withoutTags}
+            selectionMode={selectionMode}
+            selectedKeys={selectedMediaKeys}
+            onToggleItem={(item) => toggleMediaItem(getMediaItemKey(item))}
+            onToggleGroupItems={(items) => toggleGroupMediaSelection(items.map(getMediaItemKey))}
+            onItemsLoaded={handleItemsLoaded}
+            onGroupsChange={setBrowserJumpItems}
+            collapseAllSignal={browserCollapseSignal}
+            emptyMessage={
+              hasActiveTagFilter
+                ? "No videos match the selected tag filters."
+                : "No videos found. Add media sources in Settings and run a scan."
+            }
+          />
+        </>
       )}
 
       {mode === "videos" && tab === "folders" && (
         <div className="folders-panel">
+          <CollectionJumpNav items={folderJumpItems} onCollapseAll={collapseAllFolders} />
           {folderLoading ? (
             <div className="status">Loading folders...</div>
           ) : folderTrees.length === 0 ? (
@@ -706,7 +733,7 @@ export function LibraryPage() {
               );
 
               return (
-                <section key={source.key} className="folder-source-section">
+                <section key={source.key} id={`folder-source-${source.key}`} className="folder-source-section">
                   <h3 className="folder-source-title">{source.name}</h3>
                   <FolderTree
                     root={source.tree}
@@ -752,6 +779,7 @@ export function LibraryPage() {
 
       {mode === "photos" && tab === "folders" && (
         <div className="folders-panel">
+          <CollectionJumpNav items={photoFolderJumpItems} onCollapseAll={collapseAllPhotoFolders} />
           {loading ? (
             <div className="status">Loading folders...</div>
           ) : photoFolderTrees.length === 0 ? (
@@ -765,7 +793,7 @@ export function LibraryPage() {
               );
 
               return (
-                <section key={source.key} className="folder-source-section">
+                <section key={source.key} id={`folder-source-${source.key}`} className="folder-source-section">
                   <h3 className="folder-source-title">{source.name}</h3>
                   <PhotoFolderTree
                     root={source.tree}
@@ -785,22 +813,27 @@ export function LibraryPage() {
       )}
 
       {(mode !== "videos" && !(mode === "photos" && tab === "folders")) && (
-        <GroupedMediaBrowser
-          type={mode === "photos" ? "photo" : "all"}
-          groupBy={groupByForBrowser}
-          order={order}
-          search={search}
-          selectionMode={selectionMode}
-          selectedKeys={selectedMediaKeys}
-          onToggleItem={(item) => toggleMediaItem(getMediaItemKey(item))}
-          onToggleGroupItems={(items) => toggleGroupMediaSelection(items.map(getMediaItemKey))}
-          onItemsLoaded={handleItemsLoaded}
-          emptyMessage={
-            mode === "photos"
-              ? "No photos found. Add a Photo or Mixed source and run a scan."
-              : "No media found."
-          }
-        />
+        <>
+          <CollectionJumpNav items={browserJumpItems} onCollapseAll={() => setBrowserCollapseSignal((n) => n + 1)} />
+          <GroupedMediaBrowser
+            type={mode === "photos" ? "photo" : "all"}
+            groupBy={groupByForBrowser}
+            order={order}
+            search={search}
+            selectionMode={selectionMode}
+            selectedKeys={selectedMediaKeys}
+            onToggleItem={(item) => toggleMediaItem(getMediaItemKey(item))}
+            onToggleGroupItems={(items) => toggleGroupMediaSelection(items.map(getMediaItemKey))}
+            onItemsLoaded={handleItemsLoaded}
+            onGroupsChange={setBrowserJumpItems}
+            collapseAllSignal={browserCollapseSignal}
+            emptyMessage={
+              mode === "photos"
+                ? "No photos found. Add a Photo or Mixed source and run a scan."
+                : "No media found."
+            }
+          />
+        </>
       )}
 
       <TagSelectorDialog
