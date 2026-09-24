@@ -12,6 +12,8 @@ from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import LibraryRoot, Photo
 from app.schemas import (
+    FavoriteToggleIn,
+    FavoriteToggleOut,
     MediaMoveIn,
     PhotoDetailOut,
     PhotoPrepareMissingIn,
@@ -141,6 +143,7 @@ def _photo_detail(photo: Photo, source_name: str | None) -> PhotoDetailOut:
         scan_error=photo.scan_error,
         created_at=photo.created_at,
         updated_at=photo.updated_at,
+        is_favorite=bool(photo.is_favorite),
     )
 
 
@@ -152,6 +155,18 @@ def get_photo(photo_id: int, db: Session = Depends(get_db)) -> PhotoDetailOut:
         root = db.query(LibraryRoot).filter(LibraryRoot.id == photo.media_source_id).first()
         source_name = root.name if root else None
     return _photo_detail(photo, source_name)
+
+
+@router.put("/{photo_id}/favorite", response_model=FavoriteToggleOut)
+def set_photo_favorite(
+    photo_id: int,
+    payload: FavoriteToggleIn,
+    db: Session = Depends(get_db),
+) -> FavoriteToggleOut:
+    photo = _photo_or_404(db, photo_id)
+    photo.is_favorite = payload.is_favorite
+    db.commit()
+    return FavoriteToggleOut(id=photo.id, is_favorite=photo.is_favorite)
 
 
 @router.post("/{photo_id}/move", response_model=PhotoDetailOut)

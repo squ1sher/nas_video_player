@@ -14,7 +14,7 @@ from app.config import Settings, get_settings
 from app.database import get_db
 from app.media_probe import probe_video
 from app.models import DuplicateCandidateItem, HlsJob, LibraryRoot, MediaProfile, PlaylistItem, Video, VideoTag, VideoVariant, WatchProgress
-from app.schemas import MediaMoveIn, VideoBulkDeleteIn, VideoBulkDeleteOut, VideoDetail, VideoListItem, VideoTagAssignIn, VideoTagOut
+from app.schemas import MediaMoveIn, VideoBulkDeleteIn, VideoBulkDeleteOut, VideoDetail, VideoListItem, VideoTagAssignIn, VideoTagOut, FavoriteToggleIn, FavoriteToggleOut
 from app.services.library_root_service import (
     compute_relative_folder_path,
     find_library_root_for_path,
@@ -112,6 +112,7 @@ def to_list_item(
         created_at=video.created_at,
         indexed_at=video.indexed_at,
         tags=tags or [],
+        is_favorite=bool(video.is_favorite),
     )
 
 
@@ -163,6 +164,7 @@ def to_detail(
         updated_at=video.updated_at,
         indexed_at=video.indexed_at,
         tags=tags or [],
+        is_favorite=bool(video.is_favorite),
     )
 
 
@@ -643,6 +645,18 @@ def get_thumbnail(
         raise HTTPException(status_code=404, detail="Thumbnail file missing")
 
     return FileResponse(thumb_path, headers={"Cache-Control": "public, max-age=86400"})
+
+
+@router.put("/{video_id}/favorite", response_model=FavoriteToggleOut)
+def set_video_favorite(
+    video_id: int,
+    payload: FavoriteToggleIn,
+    db: Session = Depends(get_db),
+) -> FavoriteToggleOut:
+    video = get_video_or_404(db, video_id)
+    video.is_favorite = payload.is_favorite
+    db.commit()
+    return FavoriteToggleOut(id=video.id, is_favorite=video.is_favorite)
 
 
 @router.get("/{video_id}/download")

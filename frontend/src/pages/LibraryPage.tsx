@@ -25,7 +25,7 @@ import type { PlaylistSummary, UnifiedMediaItem, VideoBulkDeleteResult, VideoLis
 import { buildMediaFolderTree } from "../utils/buildMediaFolderTree";
 import { buildFolderTree } from "../utils/buildFolderTree";
 
-type Tab = "all" | "folders" | "playlists";
+type Tab = "all" | "folders" | "playlists" | "favorites";
 type LibraryMode = "videos" | "photos" | "all";
 
 type SourceGroup = {
@@ -262,7 +262,7 @@ export function LibraryPage() {
       try {
         setError(null);
         if (mode === "videos") {
-          if (tab === "all") {
+          if (tab === "all" || tab === "favorites") {
             // Grouped browser self-fetches summaries lazily.
             setLoading(false);
           } else if (tab === "folders") {
@@ -579,12 +579,18 @@ export function LibraryPage() {
           <nav className="lib-subtabs" aria-label="View">
             <button className={tab === "folders" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("folders")}>Folders</button>
             <button className={tab === "playlists" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("playlists")}>Playlists</button>
+            <button className={tab === "favorites" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("favorites")}>Favorites</button>
           </nav>
         ) : mode === "photos" ? (
           <nav className="lib-subtabs" aria-label="View">
             <button className={tab === "folders" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("folders")}>Folders</button>
+            <button className={tab === "favorites" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("favorites")}>Favorites</button>
           </nav>
-        ) : null}
+        ) : (
+          <nav className="lib-subtabs" aria-label="View">
+            <button className={tab === "favorites" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("favorites")}>Favorites</button>
+          </nav>
+        )}
         <div className="library-controls-compact">
           {(mode !== "videos" || tab !== "playlists") ? <SearchBar value={search} onChange={setSearch} /> : null}
           {(mode !== "videos" || tab !== "playlists") ? <SortSelect sort={sort} order={order} onChange={handleSortChange} /> : null}
@@ -713,6 +719,30 @@ export function LibraryPage() {
         </>
       )}
 
+      {mode === "videos" && tab === "favorites" && (
+        <>
+          <CollectionJumpNav items={browserJumpItems} onCollapseAll={() => setBrowserCollapseSignal((n) => n + 1)} />
+          <GroupedMediaBrowser
+            type="video"
+            groupBy={groupByForBrowser}
+            order={order}
+            search={search}
+            tagIds={tagFilter.withoutTags ? undefined : tagFilter.selectedTagIds}
+            tagMode={tagFilter.mode}
+            withoutTags={tagFilter.withoutTags}
+            favoritesOnly
+            selectionMode={selectionMode}
+            selectedKeys={selectedMediaKeys}
+            onToggleItem={(item) => toggleMediaItem(getMediaItemKey(item))}
+            onToggleGroupItems={(items) => toggleGroupMediaSelection(items.map(getMediaItemKey))}
+            onItemsLoaded={handleItemsLoaded}
+            onGroupsChange={setBrowserJumpItems}
+            collapseAllSignal={browserCollapseSignal}
+            emptyMessage="No favorite videos yet. Hover a thumbnail and click the star to add one."
+          />
+        </>
+      )}
+
       {mode === "videos" && tab === "folders" && (
         <div className="folders-panel">
           <CollectionJumpNav items={folderJumpItems} onCollapseAll={collapseAllFolders} />
@@ -820,6 +850,7 @@ export function LibraryPage() {
             groupBy={groupByForBrowser}
             order={order}
             search={search}
+            favoritesOnly={tab === "favorites"}
             selectionMode={selectionMode}
             selectedKeys={selectedMediaKeys}
             onToggleItem={(item) => toggleMediaItem(getMediaItemKey(item))}
@@ -828,7 +859,9 @@ export function LibraryPage() {
             onGroupsChange={setBrowserJumpItems}
             collapseAllSignal={browserCollapseSignal}
             emptyMessage={
-              mode === "photos"
+              tab === "favorites"
+                ? "No favorites yet. Hover a thumbnail and click the star to add one."
+                : mode === "photos"
                 ? "No photos found. Add a Photo or Mixed source and run a scan."
                 : "No media found."
             }

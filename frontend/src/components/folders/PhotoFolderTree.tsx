@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 
+import { setPhotoFavorite } from "../../api/client";
 import type { SortField, SortOrder } from "../../api/client";
 import type { UnifiedMediaItem } from "../../types/video";
 import type { MediaFolderTreeNode } from "../../utils/buildMediaFolderTree";
 import { groupMediaItems } from "../../utils/groupMediaItems";
+import { FavoriteStarButton } from "../FavoriteStarButton";
 import { GroupToggleHeader } from "../GroupToggleHeader";
 
 type Props = {
@@ -99,6 +101,10 @@ function PhotoCard({
             />
           </label>
         ) : null}
+        <FavoriteStarButton
+          isFavorite={item.is_favorite}
+          onToggle={(next) => setPhotoFavorite(item.id, next)}
+        />
       </div>
     </>
   );

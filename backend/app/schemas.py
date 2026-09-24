@@ -93,6 +93,7 @@ class VideoListItem(BaseModel):
     created_at: datetime
     indexed_at: datetime
     tags: list["VideoTagLiteOut"] = Field(default_factory=list)
+    is_favorite: bool = False
 
 
 class VideoDetail(BaseModel):
@@ -136,6 +137,7 @@ class VideoDetail(BaseModel):
     updated_at: datetime
     indexed_at: datetime
     tags: list["VideoTagLiteOut"] = Field(default_factory=list)
+    is_favorite: bool = False
 
 
 class VideoTagLiteOut(BaseModel):
@@ -155,6 +157,15 @@ class VideoTagOut(BaseModel):
 
 class VideoTagAssignIn(BaseModel):
     tag_ids: list[int]
+
+
+class FavoriteToggleIn(BaseModel):
+    is_favorite: bool
+
+
+class FavoriteToggleOut(BaseModel):
+    id: int
+    is_favorite: bool
 
 
 class VideoBulkDeleteIn(BaseModel):
@@ -206,6 +217,7 @@ class PlaylistVideoOut(BaseModel):
     file_modified_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     indexed_at: Optional[datetime] = None
+    is_favorite: bool = False
 
 
 class PlaylistItemOut(BaseModel):
@@ -803,6 +815,7 @@ class PhotoOut(BaseModel):
     scan_error: str | None = None
     created_at: datetime
     updated_at: datetime
+    is_favorite: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -870,6 +883,7 @@ class MediaItemOut(BaseModel):
     media_source_name: str | None = None
     folder_path: str | None = None
     tags: list[VideoTagLiteOut] = Field(default_factory=list)
+    is_favorite: bool = False
 
 
 class MediaListQueryOut(BaseModel):

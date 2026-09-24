@@ -37,6 +37,7 @@ export type VideoListItem = {
   created_at: string;
   indexed_at: string;
   tags: VideoTagLite[];
+  is_favorite: boolean;
 };
 
 export type VideoDetail = {
@@ -80,6 +81,7 @@ export type VideoDetail = {
   updated_at: string;
   indexed_at: string;
   tags: VideoTagLite[];
+  is_favorite: boolean;
 };
 
 export type VideoTagLite = {
@@ -170,6 +172,7 @@ export type PlaylistVideoItem = {
   file_modified_at: string | null;
   created_at: string | null;
   indexed_at: string | null;
+  is_favorite: boolean;
 };
 
 export type PlaylistItem = {
@@ -646,6 +649,7 @@ export type PhotoDetail = {
   scan_error: string | null;
   created_at: string;
   updated_at: string;
+  is_favorite: boolean;
 };
 
 export type UnifiedMediaItem = {
@@ -665,6 +669,7 @@ export type UnifiedMediaItem = {
   media_source_name: string | null;
   folder_path: string | null;
   tags: VideoTagLite[];
+  is_favorite: boolean;
 };
 
 export type UnifiedMediaList = {

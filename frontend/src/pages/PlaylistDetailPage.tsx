@@ -121,6 +121,7 @@ function toVideoListItem(item: PlaylistItem): VideoListItem {
     created_at: v.created_at ?? new Date(0).toISOString(),
     indexed_at: v.indexed_at ?? new Date(0).toISOString(),
     tags: v.tags,
+    is_favorite: v.is_favorite,
   };
 }
 

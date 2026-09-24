@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 
+import { setPhotoFavorite, setVideoFavorite } from "../../api/client";
 import type { UnifiedMediaItem } from "../../types/video";
+import { FavoriteStarButton } from "../FavoriteStarButton";
 
 export function mediaItemKey(item: UnifiedMediaItem): string {
   return `${item.type}:${item.id}`;
@@ -58,6 +60,12 @@ export function MediaCard({ item, selectionMode = false, selected = false, onTog
             <input type="checkbox" checked={selected} onChange={() => onToggleSelect?.(item)} />
           </label>
         ) : null}
+        <FavoriteStarButton
+          isFavorite={item.is_favorite}
+          onToggle={(next) =>
+            item.type === "video" ? setVideoFavorite(item.id, next) : setPhotoFavorite(item.id, next)
+          }
+        />
       </div>
     </>
   );

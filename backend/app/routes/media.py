@@ -66,6 +66,7 @@ def _video_to_item(video: Video, root_name: str | None, tags: list) -> MediaItem
         media_source_name=root_name,
         folder_path=video.folder_path,
         tags=tags,
+        is_favorite=bool(video.is_favorite),
     )
 
 
@@ -87,6 +88,7 @@ def _photo_to_item(photo: Photo, root_name: str | None) -> MediaItemOut:
         media_source_name=root_name,
         folder_path=_photo_folder_path(photo),
         tags=[],
+        is_favorite=bool(photo.is_favorite),
     )
 
 
@@ -120,6 +122,7 @@ def _filtered_videos_query(
     tag_ids: list[int],
     tag_mode: str,
     without_tags: bool,
+    favorites_only: bool = False,
 ):
     query = db.query(Video)
     query = query.filter(~Video.extension.in_(sorted(IMAGE_EXTENSIONS)))
@@ -130,6 +133,8 @@ def _filtered_videos_query(
             Video.availability_status == "missing",
         )
     )
+    if favorites_only:
+        query = query.filter(Video.is_favorite.is_(True))
     if media_source_id is not None:
         query = query.filter(Video.library_root_id == media_source_id)
     if search:
@@ -164,8 +169,11 @@ def _filtered_photos_query(
     tag_ids: list[int],
     tag_mode: str,
     without_tags: bool,
+    favorites_only: bool = False,
 ):
     query = db.query(Photo)
+    if favorites_only:
+        query = query.filter(Photo.is_favorite.is_(True))
     if media_source_id is not None:
         query = query.filter(Photo.media_source_id == media_source_id)
     if search:
@@ -209,6 +217,7 @@ def _collect_media_rows(
     tag_ids: list[int],
     tag_mode: str,
     without_tags: bool,
+    favorites_only: bool = False,
 ) -> list[_MediaRow]:
     rows: list[_MediaRow] = []
 
@@ -222,6 +231,7 @@ def _collect_media_rows(
             tag_ids=tag_ids,
             tag_mode=tag_mode,
             without_tags=without_tags,
+            favorites_only=favorites_only,
         ).all()
         for video in videos:
             video_date, _ = _video_date(video)
@@ -238,6 +248,7 @@ def _collect_media_rows(
             tag_ids=tag_ids,
             tag_mode=tag_mode,
             without_tags=without_tags,
+            favorites_only=favorites_only,
         ).all()
         for photo in photos:
             if folder is not None and _photo_folder_path(photo) != folder:
@@ -316,6 +327,7 @@ def list_media(
     sort: Literal["date", "file_size"] = "date",
     order: Literal["asc", "desc"] = "desc",
     media_source_id: int | None = None,
+    favorites_only: bool = False,
     db: Session = Depends(get_db),
 ) -> MediaListQueryOut:
     root_name_by_id = {root.id: root.name for root in db.query(LibraryRoot).all()}
@@ -325,6 +337,7 @@ def list_media(
         videos = _filtered_videos_query(
             db, search=search, media_source_id=media_source_id, folder=None,
             playlist_id=None, tag_ids=[], tag_mode="any", without_tags=False,
+            favorites_only=favorites_only,
         ).all()
         tags_by_video = get_video_tags_map(db, [video.id for video in videos])
         for video in videos:
@@ -334,6 +347,7 @@ def list_media(
         photos = _filtered_photos_query(
             db, search=search, media_source_id=media_source_id,
             tag_ids=[], tag_mode="any", without_tags=False,
+            favorites_only=favorites_only,
         ).all()
         for photo in photos:
             items.append(_photo_to_item(photo, root_name_by_id.get(photo.media_source_id)))
@@ -359,6 +373,7 @@ def list_media_groups(
     folder: str | None = None,
     playlist_id: int | None = None,
     year: int | None = None,
+    favorites_only: bool = False,
     db: Session = Depends(get_db),
 ) -> list[MediaGroupOut]:
     parsed_tag_ids = _parse_tag_ids(tag_ids)
@@ -372,6 +387,7 @@ def list_media_groups(
         tag_ids=parsed_tag_ids,
         tag_mode=tag_mode,
         without_tags=without_tags,
+        favorites_only=favorites_only,
     )
 
     if group_by == "date":
@@ -450,6 +466,7 @@ def list_media_group_items(
     media_source_id: int | None = None,
     folder: str | None = None,
     playlist_id: int | None = None,
+    favorites_only: bool = False,
     db: Session = Depends(get_db),
 ) -> MediaGroupItemsOut:
     parsed_tag_ids = _parse_tag_ids(tag_ids)
@@ -463,6 +480,7 @@ def list_media_group_items(
         tag_ids=parsed_tag_ids,
         tag_mode=tag_mode,
         without_tags=without_tags,
+        favorites_only=favorites_only,
     )
 
     if group_by == "date":

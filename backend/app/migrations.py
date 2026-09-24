@@ -935,5 +935,11 @@ def run_migrations(engine: Engine) -> None:
             )
         )
 
+    # ── favorites (star) flag on videos/photos ──────────────────────────────
+    _add_column_if_missing(engine, "videos", "is_favorite", "BOOLEAN NOT NULL DEFAULT 0")
+    _add_column_if_missing(engine, "photos", "is_favorite", "BOOLEAN NOT NULL DEFAULT 0")
+    _create_index_if_missing(engine, "ix_videos_is_favorite", "videos", "is_favorite")
+    _create_index_if_missing(engine, "ix_photos_is_favorite", "photos", "is_favorite")
+
     logger.info("Database migrations applied successfully")
 

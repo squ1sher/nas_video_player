@@ -1,4 +1,6 @@
+import { setVideoFavorite } from "../api/client";
 import type { VideoListItem, WatchProgress } from "../types/video";
+import { FavoriteStarButton } from "./FavoriteStarButton";
 
 type Props = {
   video: VideoListItem;
@@ -50,6 +52,11 @@ export function VideoCard({
             <input type="checkbox" checked={selected} onChange={handleToggle} />
           </label>
         ) : null}
+
+        <FavoriteStarButton
+          isFavorite={video.is_favorite}
+          onToggle={(next) => setVideoFavorite(video.id, next)}
+        />
 
         {video.tags.length > 0 ? (
           <div className="thumb-title-overlay" aria-hidden="true">

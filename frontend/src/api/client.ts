@@ -196,6 +196,7 @@ export type MediaGroupFilters = {
   media_source_id?: number;
   folder?: string;
   playlist_id?: number;
+  favorites_only?: boolean;
 };
 
 function applyMediaGroupFilters(query: URLSearchParams, params: MediaGroupFilters): void {
@@ -209,6 +210,7 @@ function applyMediaGroupFilters(query: URLSearchParams, params: MediaGroupFilter
   if (params.media_source_id !== undefined) query.set("media_source_id", String(params.media_source_id));
   if (params.folder !== undefined) query.set("folder", params.folder);
   if (params.playlist_id !== undefined) query.set("playlist_id", String(params.playlist_id));
+  if (params.favorites_only) query.set("favorites_only", String(params.favorites_only));
 }
 
 export async function fetchMediaGroups(
@@ -475,6 +477,26 @@ export async function deleteVideo(videoId: number): Promise<{ deleted: boolean }
   return handleResponse<{ deleted: boolean }>(
     await fetch(`${API_BASE}/videos/${videoId}`, {
       method: "DELETE",
+    })
+  );
+}
+
+export async function setVideoFavorite(videoId: number, isFavorite: boolean): Promise<{ id: number; is_favorite: boolean }> {
+  return handleResponse<{ id: number; is_favorite: boolean }>(
+    await fetch(`${API_BASE}/videos/${videoId}/favorite`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_favorite: isFavorite }),
+    })
+  );
+}
+
+export async function setPhotoFavorite(photoId: number, isFavorite: boolean): Promise<{ id: number; is_favorite: boolean }> {
+  return handleResponse<{ id: number; is_favorite: boolean }>(
+    await fetch(`${API_BASE}/photos/${photoId}/favorite`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_favorite: isFavorite }),
     })
   );
 }

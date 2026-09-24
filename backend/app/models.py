@@ -68,6 +68,7 @@ class Photo(Base):
     thumbnail_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     scan_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_format: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -127,6 +128,7 @@ class Video(Base):
     # Availability status: None / "available" = normal; "missing" = source enabled but file gone;
     # "source_disabled" = root disabled; "source_removed" = root deleted; "deleted" = user deleted
     availability_status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
 
 
 class WatchProgress(Base):

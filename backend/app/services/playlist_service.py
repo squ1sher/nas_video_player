@@ -78,6 +78,7 @@ def _playlist_video_payload(
             "file_modified_at": None,
             "created_at": None,
             "indexed_at": None,
+            "is_favorite": False,
         }
 
     thumb_url = f"/api/videos/{video.id}/thumbnail" if video.thumbnail_path else None
@@ -99,6 +100,7 @@ def _playlist_video_payload(
         "file_modified_at": file_modified_at,
         "created_at": video.created_at,
         "indexed_at": video.indexed_at,
+        "is_favorite": bool(video.is_favorite),
     }
 
 

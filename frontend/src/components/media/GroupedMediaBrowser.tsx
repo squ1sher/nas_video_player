@@ -34,6 +34,8 @@ type Props = {
   mediaSourceId?: number;
   folder?: string;
   playlistId?: number;
+  /** When true, restricts results to favorited items only. */
+  favoritesOnly?: boolean;
   selectionMode?: boolean;
   selectedKeys: Set<string>;
   onToggleItem: (item: UnifiedMediaItem) => void;
@@ -87,6 +89,7 @@ export function GroupedMediaBrowser(props: Props) {
     mediaSourceId,
     folder,
     playlistId,
+    favoritesOnly,
     selectionMode = false,
     selectedKeys,
     onToggleItem,
@@ -109,8 +112,9 @@ export function GroupedMediaBrowser(props: Props) {
       media_source_id: mediaSourceId,
       folder,
       playlist_id: playlistId,
+      favorites_only: favoritesOnly || undefined,
     }),
-    [type, groupBy, order, search, tagIds, tagMode, withoutTags, mediaSourceId, folder, playlistId]
+    [type, groupBy, order, search, tagIds, tagMode, withoutTags, mediaSourceId, folder, playlistId, favoritesOnly]
   );
 
   // Serialized key used to reset all lazy state when filters change.
