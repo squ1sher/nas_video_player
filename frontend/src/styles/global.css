@@ -1,7 +1,32 @@
 :root {
-  font-family: Arial, sans-serif;
-  color: #f0f0f0;
-  background-color: #121212;
+  color-scheme: light dark;
+  --bg-app: #f5f5f7;
+  --bg-elevated: #ffffff;
+  --bg-hover: #e8e8ed;
+  --bg-sidebar: #eceef1;
+  --bg-thumb: #e2e2e6;
+  --border-color: #d8d8dc;
+  --text-primary: #1d1d1f;
+  --text-secondary: #6e6e73;
+  --accent: #0a84ff;
+
+  font-family: -apple-system, "SF Pro Text", Arial, sans-serif;
+  color: var(--text-primary);
+  background-color: var(--bg-app);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-app: #121212;
+    --bg-elevated: #1f1f1f;
+    --bg-hover: #2a2a2a;
+    --bg-sidebar: #1c1c1e;
+    --bg-thumb: #222222;
+    --border-color: #3a3a3a;
+    --text-primary: #f0f0f0;
+    --text-secondary: #a0a0a5;
+    --accent: #4dabff;
+  }
 }
 
 * {
@@ -10,7 +35,7 @@
 
 body {
   margin: 0;
-  background: #121212;
+  background: var(--bg-app);
 }
 
 a {
@@ -49,10 +74,10 @@ button {
   position: sticky;
   top: 0;
   z-index: 60;
-  background: #121212;
+  background: var(--bg-app);
   padding: 8px 0 10px;
   margin-bottom: 14px;
-  border-bottom: 1px solid #242424;
+  border-bottom: 1px solid var(--bg-hover);
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.38);
 }
 
@@ -75,14 +100,14 @@ button {
 .page-header button {
   padding: 8px 16px;
   border-radius: 8px;
-  border: 1px solid #404040;
-  background: #1f1f1f;
-  color: #f0f0f0;
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   font-size: 14px;
 }
 
 .page-header button:hover:not(:disabled) {
-  background: #2a2a2a;
+  background: var(--bg-hover);
 }
 
 .page-header button:disabled {
@@ -127,17 +152,17 @@ button {
   min-width: 220px;
   padding: 10px;
   border-radius: 8px;
-  border: 1px solid #404040;
-  background: #1f1f1f;
-  color: #f0f0f0;
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 .sort-controls select {
   padding: 8px 12px;
   border-radius: 8px;
-  border: 1px solid #404040;
-  background: #1f1f1f;
-  color: #f0f0f0;
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 .sort-controls {
@@ -149,22 +174,22 @@ button {
 .sort-order-toggle {
   padding: 8px 12px;
   border-radius: 8px;
-  border: 1px solid #404040;
-  background: #1f1f1f;
-  color: #f0f0f0;
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   font-size: 13px;
 }
 
 .sort-order-toggle:hover {
-  background: #2a2a2a;
+  background: var(--bg-hover);
 }
 
 .playback-filter-select {
   padding: 8px 12px;
   border-radius: 8px;
-  border: 1px solid #404040;
-  background: #1f1f1f;
-  color: #f0f0f0;
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 .compat-chip-row {
@@ -252,7 +277,7 @@ button {
 /* ── Browse modal ── */
 .browse-breadcrumb {
   font-size: 13px;
-  color: #aaa;
+  color: var(--text-secondary);
   margin-bottom: 8px;
 }
 .browse-breadcrumb-link {
@@ -283,12 +308,134 @@ button {
 .browse-item-added { opacity: 0.7; }
 .browse-item-name { cursor: pointer; flex: 1; }
 .browse-blocked-label { color: #ff8888; font-size: 11px; }
-.browse-added-label { color: #888; font-size: 11px; }
+.browse-added-label { color: var(--text-secondary); font-size: 11px; }
 
 /* ── Compact library page ── */
 .page-library-compact {
   padding-bottom: 110px;
 }
+
+/* ── macOS Photos-style shell: fixed left sidebar + scrollable main pane ── */
+.page-library-photos {
+  padding-bottom: 0;
+  max-width: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.photos-shell {
+  display: flex;
+  align-items: flex-start;
+  min-height: calc(100vh - 20px);
+}
+
+.photos-sidebar {
+  flex: 0 0 220px;
+  width: 220px;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: calc(100vh - 20px);
+  overflow-y: auto;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-color);
+  padding: 16px 10px;
+}
+
+.photos-sidebar-section + .photos-sidebar-section {
+  margin-top: 18px;
+}
+
+.photos-sidebar-heading {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  padding: 0 10px 6px;
+}
+
+.photos-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13.5px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.photos-sidebar-item:hover {
+  background: var(--bg-hover);
+}
+
+.photos-sidebar-item.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.photos-sidebar-icon {
+  font-size: 14px;
+  width: 18px;
+  text-align: center;
+}
+
+.photos-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 16px 24px 110px;
+}
+
+.photos-zoom-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.photos-zoom-control input[type="range"] {
+  width: 90px;
+}
+
+@media (max-width: 860px) {
+  .photos-shell {
+    flex-direction: column;
+  }
+
+  .photos-sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .photos-sidebar-section {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .photos-sidebar-section + .photos-sidebar-section {
+    margin-top: 0;
+  }
+
+  .photos-sidebar-heading {
+    display: none;
+  }
+
+  .photos-main {
+    padding: 16px 16px 110px;
+  }
+}
+
 
 .library-compact-header {
   display: flex;
@@ -341,7 +488,7 @@ button {
   gap: 2px;
   border: 1px solid #2d2d2d;
   border-radius: 8px;
-  background: #181818;
+  background: var(--bg-elevated);
   box-shadow: 0 10px 18px rgba(0, 0, 0, 0.35);
   z-index: 30;
   padding: 6px;
@@ -358,7 +505,7 @@ button {
 }
 
 .library-menu-item:hover:not(:disabled) {
-  background: #242424;
+  background: var(--bg-hover);
 }
 
 .library-menu-item:disabled {
@@ -467,8 +614,8 @@ button {
 }
 
 .settings-kv-grid > div {
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-hover);
   border-radius: 6px;
   padding: 8px;
   font-size: 13px;
@@ -503,16 +650,16 @@ button {
   display: flex;
   gap: 4px;
   margin: 0 0 4px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-color);
   padding-bottom: 0;
-  background: #121212;
+  background: var(--bg-app);
 }
 
 .tab-btn {
   padding: 8px 16px;
   border: none;
   background: transparent;
-  color: #aaa;
+  color: var(--text-secondary);
   font-size: 14px;
   border-radius: 6px 6px 0 0;
   position: relative;
@@ -522,12 +669,12 @@ button {
 }
 
 .tab-btn:hover {
-  background: #1f1f1f;
+  background: var(--bg-elevated);
   color: #eee;
 }
 
 .tab-btn.active {
-  background: #1f1f1f;
+  background: var(--bg-elevated);
   color: #fff;
   border-bottom: 2px solid #90caf9;
 }
@@ -543,7 +690,7 @@ button {
 
 .lib-subtab-btn {
   padding: 4px 12px;
-  border: 1px solid #333;
+  border: 1px solid var(--border-color);
   border-radius: 999px;
   background: transparent;
   color: #9aa6b2;
@@ -573,7 +720,7 @@ button {
 /* ── Video grid ── */
 .video-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--thumb-min, 210px), 1fr));
   gap: 12px;
   margin-top: 12px;
 }
@@ -792,7 +939,7 @@ button {
 }
 
 .collection-jump-item:hover {
-  background: #1f1f1f;
+  background: var(--bg-elevated);
   color: #e6edf3;
 }
 
@@ -808,7 +955,7 @@ button {
   justify-content: center;
   width: 100%;
   height: 100%;
-  background: #1a1a1a;
+  background: var(--bg-elevated);
   color: #66707a;
   font-size: 12px;
 }
@@ -828,7 +975,7 @@ button {
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid #2d2d2d;
-  background: #181818;
+  background: var(--bg-elevated);
   transition: border-color 0.15s, transform 0.1s;
 }
 
@@ -857,7 +1004,7 @@ button.video-card {
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: #222;
+  background: var(--bg-thumb);
 }
 
 /* Square crop used by mixed photo/video grids so portrait, square, and
@@ -906,7 +1053,7 @@ button.video-card {
 
 .media-favorite-btn svg {
   fill: none;
-  stroke: #f0f0f0;
+  stroke: var(--text-primary);
   stroke-width: 1.5;
 }
 
@@ -948,7 +1095,7 @@ button.video-card {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #888;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -983,7 +1130,7 @@ button.video-card {
 
 .thumb-title-text {
   display: block;
-  color: #f0f0f0;
+  color: var(--text-primary);
   font-size: 12px;
   font-weight: 600;
   line-height: 1.3;
@@ -1147,7 +1294,7 @@ button.video-card {
 .folder-root-files {
   border: 1px solid #2d2d2d;
   border-radius: 10px;
-  background: #181818;
+  background: var(--bg-elevated);
   padding: 10px;
 }
 
@@ -1199,9 +1346,9 @@ button.video-card {
   grid-template-columns: 160px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--bg-hover);
   border-radius: 8px;
-  background: #141414;
+  background: var(--bg-elevated);
   padding: 8px;
 }
 
@@ -1216,7 +1363,7 @@ button.video-card {
   aspect-ratio: 16 / 9;
   border-radius: 6px;
   overflow: hidden;
-  background: #222;
+  background: var(--bg-thumb);
 }
 
 .folder-video-thumb {
@@ -1271,8 +1418,8 @@ button.video-card {
   padding: 12px 14px;
   border: 1px solid #2d2d2d;
   border-radius: 8px;
-  background: #181818;
-  color: #f0f0f0;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   font-size: 14px;
   text-align: left;
   transition: background 0.15s, border-color 0.15s;
@@ -1335,18 +1482,18 @@ button.video-card {
   padding: 10px 12px;
   border: 1px solid #2d2d2d;
   border-radius: 8px;
-  background: #181818;
-  color: #f0f0f0;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   text-align: left;
 }
 
 .folder-tree-item:hover {
-  background: #222;
+  background: var(--bg-thumb);
   border-color: #555;
 }
 
 .folder-item:hover {
-  background: #222;
+  background: var(--bg-thumb);
   border-color: #555;
 }
 
@@ -1362,7 +1509,7 @@ button.video-card {
 }
 
 .folder-count {
-  color: #888;
+  color: var(--text-secondary);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -1370,7 +1517,7 @@ button.video-card {
 .folder-breadcrumb {
   margin: 12px 0 4px;
   font-size: 14px;
-  color: #aaa;
+  color: var(--text-secondary);
 }
 
 .link-btn {
@@ -1413,7 +1560,7 @@ button.video-card {
 .watch-tags-panel {
   border: 1px solid #2d2d2d;
   border-radius: 10px;
-  background: #181818;
+  background: var(--bg-elevated);
   padding: 12px;
   margin-bottom: 12px;
 }
@@ -1500,7 +1647,7 @@ button.video-card {
 }
 
 .tag-tree-toggle {
-  border: 1px solid #3a3a3a;
+  border: 1px solid var(--border-color);
   background: #1b1b1b;
   color: #e5e7eb;
   border-radius: 4px;
@@ -1512,7 +1659,7 @@ button.video-card {
 .tag-tree-name {
   border: none;
   background: transparent;
-  color: #f0f0f0;
+  color: var(--text-primary);
   text-align: left;
   padding: 3px 0;
   cursor: pointer;
@@ -1532,7 +1679,7 @@ button.video-card {
   border: 1px solid #4a6a88;
   border-radius: 6px;
   background: #10151b;
-  color: #f0f0f0;
+  color: var(--text-primary);
   font-size: 13px;
 }
 
@@ -1593,7 +1740,7 @@ button.video-card {
 .watch-details-card {
   border: 1px solid #2d2d2d;
   border-radius: 10px;
-  background: #181818;
+  background: var(--bg-elevated);
   padding: 12px;
 }
 
@@ -1618,7 +1765,7 @@ button.video-card {
 .tags-editor-panel {
   border: 1px solid #2d2d2d;
   border-radius: 10px;
-  background: #181818;
+  background: var(--bg-elevated);
   padding: 12px;
 }
 
@@ -1664,7 +1811,7 @@ button.video-card {
   border-radius: 6px;
   border: 1px solid #555;
   background: transparent;
-  color: #f0f0f0;
+  color: var(--text-primary);
   font-size: 13px;
 }
 
@@ -1756,7 +1903,7 @@ button.video-card {
 
 /* ── Player error ── */
 .player-error {
-  background: #1a1a1a;
+  background: var(--bg-elevated);
   border: 1px solid #4d1010;
   border-radius: 8px;
   padding: 20px;
@@ -1771,7 +1918,7 @@ button.video-card {
 
 .player-error-details {
   font-size: 13px;
-  color: #ccc;
+  color: var(--text-secondary);
 }
 
 .player-error-details p {
@@ -1780,7 +1927,7 @@ button.video-card {
 
 .compat-reason {
   font-style: italic;
-  color: #aaa;
+  color: var(--text-secondary);
 }
 
 /* ── Meta grid ── */
@@ -1793,12 +1940,12 @@ button.video-card {
 }
 
 .meta-grid > div {
-  color: #ccc;
+  color: var(--text-secondary);
 }
 
 .compat-detail {
   grid-column: 1 / -1;
-  color: #aaa;
+  color: var(--text-secondary);
 }
 
 .duplicates-panel {
@@ -1820,8 +1967,8 @@ button.video-card {
   text-align: left;
   border: 1px solid #2d2d2d;
   border-radius: 10px;
-  background: #181818;
-  color: #f0f0f0;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -1841,7 +1988,7 @@ button.video-card {
 .diagnostics-section {
   border: 1px solid #2d2d2d;
   border-radius: 10px;
-  background: #181818;
+  background: var(--bg-elevated);
   padding: 12px;
   margin-bottom: 12px;
 }
@@ -1901,7 +2048,7 @@ button.video-card {
   border: 1px solid #3e3e3e;
   border-radius: 6px;
   background: #111;
-  color: #f0f0f0;
+  color: var(--text-primary);
 }
 
 .checkbox-inline {
@@ -1917,7 +2064,7 @@ button.video-card {
 }
 
 .media-profile-item {
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--bg-hover);
   border-radius: 10px;
   background: #131313;
   padding: 10px;
@@ -1946,7 +2093,7 @@ button.video-card {
 .media-profile-sample-link {
   display: block;
   aspect-ratio: 16 / 9;
-  background: #222;
+  background: var(--bg-thumb);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -1982,7 +2129,7 @@ button.video-card {
   padding: 12px;
   border-radius: 10px;
   border: 1px solid #2d2d2d;
-  background: #181818;
+  background: var(--bg-elevated);
 }
 
 .duplicate-summary-card strong {
@@ -2001,7 +2148,7 @@ button.video-card {
   margin-top: 10px;
   border: 1px solid #2d2d2d;
   border-radius: 10px;
-  background: #181818;
+  background: var(--bg-elevated);
   padding: 10px 12px;
   display: flex;
   align-items: center;
@@ -2022,7 +2169,7 @@ button.video-card {
 .duplicate-group-card {
   border: 1px solid #2d2d2d;
   border-radius: 12px;
-  background: #181818;
+  background: var(--bg-elevated);
   padding: 16px;
 }
 
@@ -2106,7 +2253,7 @@ button.video-card {
   width: 200px;
   max-width: 32%;
   aspect-ratio: 16 / 9;
-  background: #222;
+  background: var(--bg-thumb);
   border-radius: 8px;
   overflow: hidden;
   flex-shrink: 0;
@@ -2294,7 +2441,7 @@ button.video-card {
 .settings-section {
   border: 1px solid #2d2d2d;
   border-radius: 12px;
-  background: #181818;
+  background: var(--bg-elevated);
   padding: 16px;
   margin-bottom: 18px;
 }
@@ -2355,7 +2502,7 @@ button.video-card {
 .settings-table th,
 .settings-table td {
   padding: 10px 12px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--bg-hover);
   text-align: left;
   vertical-align: middle;
   font-size: 13px;
@@ -2408,7 +2555,7 @@ button.video-card {
   border-radius: 6px;
   border: 1px solid #555;
   background: transparent;
-  color: #f0f0f0;
+  color: var(--text-primary);
   font-size: 12px;
 }
 
@@ -2547,7 +2694,7 @@ button.video-card {
   border-radius: 8px;
   border: 1px solid #404852;
   background: #10151b;
-  color: #f0f0f0;
+  color: var(--text-primary);
 }
 
 .input-row {
@@ -2750,7 +2897,7 @@ button.video-card {
 
 .playlist-card {
   border: 1px solid #2d2d2d;
-  background: #181818;
+  background: var(--bg-elevated);
   border-radius: 10px;
   color: #e2e8f0;
   text-align: left;
@@ -2773,7 +2920,7 @@ button.video-card {
 .playlist-detail {
   border: 1px solid #2d2d2d;
   border-radius: 12px;
-  background: #181818;
+  background: var(--bg-elevated);
   padding: 14px;
 }
 
@@ -2802,9 +2949,9 @@ button.video-card {
   grid-template-columns: 36px 160px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--bg-hover);
   border-radius: 8px;
-  background: #141414;
+  background: var(--bg-elevated);
   padding: 8px;
 }
 
@@ -2820,7 +2967,7 @@ button.video-card {
   aspect-ratio: 16 / 9;
   border-radius: 6px;
   overflow: hidden;
-  background: #222;
+  background: var(--bg-thumb);
 }
 
 .playlist-item-thumb img {
@@ -2866,7 +3013,7 @@ button.video-card {
   border-radius: 8px;
   border: 1px solid #404852;
   background: #10151b;
-  color: #f0f0f0;
+  color: var(--text-primary);
 }
 
 .watch-playlist-strip {
@@ -2931,7 +3078,7 @@ button.video-card {
   aspect-ratio: 16 / 9;
   border-radius: 8px;
   overflow: hidden;
-  background: #222;
+  background: var(--bg-thumb);
 }
 
 .watch-playlist-up-next-thumb img {

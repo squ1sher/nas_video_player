@@ -12,6 +12,7 @@ import {
 import type { MediaGroupBy, SortField, SortOrder } from "../api/client";
 import { SearchBar } from "../components/SearchBar";
 import { SortSelect } from "../components/SortSelect";
+import { LibrarySidebar } from "../components/library/LibrarySidebar";
 import { CollectionJumpNav } from "../components/CollectionJumpNav";
 import type { JumpNavItem } from "../components/CollectionJumpNav";
 import { FolderTree } from "../components/folders/FolderTree";
@@ -97,6 +98,7 @@ export function LibraryPage() {
   const [loadedItemsByKey, setLoadedItemsByKey] = useState<Map<string, UnifiedMediaItem>>(new Map());
   const [browserJumpItems, setBrowserJumpItems] = useState<JumpNavItem[]>([]);
   const [browserCollapseSignal, setBrowserCollapseSignal] = useState(0);
+  const [thumbZoom, setThumbZoom] = useState(2); // 0 (small) .. 4 (large)
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagFilterDialogOpen, setTagFilterDialogOpen] = useState(false);
   const [tagFilter, setTagFilter] = useState<TagFilterState>({ selectedTagIds: [], mode: "any", withoutTags: false });
@@ -331,7 +333,6 @@ export function LibraryPage() {
 
   useEffect(() => {
     if (mode !== "videos") {
-      setTab("all");
       setSelectedIds(new Set());       // clear video selection when leaving videos mode
     } else {
       setSelectedMediaKeys(new Set()); // clear media selection when entering videos mode
@@ -565,35 +566,32 @@ export function LibraryPage() {
       ? `Selected: ${selectedVideos.length}`
       : `Selected: ${selectedMediaKeys.size}`;
 
-  const toggleTab = (value: Tab) => setTab((prev) => (prev === value ? "all" : value));
+  const THUMB_MIN_WIDTHS = [130, 160, 190, 220, 260];
+  const thumbMinWidth = THUMB_MIN_WIDTHS[thumbZoom] ?? 190;
 
   return (
-    <div className="page page-library-compact">
+    <div className="page page-library-photos">
+      <div className="photos-shell">
+        <LibrarySidebar mode={mode} tab={tab} onNavigate={(nextMode, nextTab) => { setMode(nextMode); setTab(nextTab); }} />
+        <div className="photos-main" style={{ ["--thumb-min" as string]: `${thumbMinWidth}px` }}>
       <header className="library-compact-header">
-        <nav className="lib-tabs lib-tabs-compact">
-          <button className={mode === "videos" ? "tab-btn active" : "tab-btn"} onClick={() => setMode("videos")}>Videos</button>
-          <button className={mode === "photos" ? "tab-btn active" : "tab-btn"} onClick={() => setMode("photos")}>Photos</button>
-          <button className={mode === "all" ? "tab-btn active" : "tab-btn"} onClick={() => setMode("all")}>All</button>
-        </nav>
-        {mode === "videos" ? (
-          <nav className="lib-subtabs" aria-label="View">
-            <button className={tab === "folders" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("folders")}>Folders</button>
-            <button className={tab === "playlists" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("playlists")}>Playlists</button>
-            <button className={tab === "favorites" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("favorites")}>Favorites</button>
-          </nav>
-        ) : mode === "photos" ? (
-          <nav className="lib-subtabs" aria-label="View">
-            <button className={tab === "folders" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("folders")}>Folders</button>
-            <button className={tab === "favorites" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("favorites")}>Favorites</button>
-          </nav>
-        ) : (
-          <nav className="lib-subtabs" aria-label="View">
-            <button className={tab === "favorites" ? "lib-subtab-btn active" : "lib-subtab-btn"} onClick={() => toggleTab("favorites")}>Favorites</button>
-          </nav>
-        )}
         <div className="library-controls-compact">
           {(mode !== "videos" || tab !== "playlists") ? <SearchBar value={search} onChange={setSearch} /> : null}
           {(mode !== "videos" || tab !== "playlists") ? <SortSelect sort={sort} order={order} onChange={handleSortChange} /> : null}
+          {(mode !== "videos" || tab !== "playlists") ? (
+            <div className="photos-zoom-control" title="Thumbnail size">
+              <span className="photos-zoom-icon" aria-hidden="true">🔍</span>
+              <input
+                type="range"
+                min={0}
+                max={THUMB_MIN_WIDTHS.length - 1}
+                step={1}
+                value={thumbZoom}
+                onChange={(e) => setThumbZoom(Number(e.target.value))}
+                aria-label="Thumbnail size"
+              />
+            </div>
+          ) : null}
           {selectionMode ? <span className="library-selected-count">{selectionLabel}</span> : null}
 
           <div className="library-menu" ref={menuRef}>
@@ -715,30 +713,6 @@ export function LibraryPage() {
                 ? "No videos match the selected tag filters."
                 : "No videos found. Add media sources in Settings and run a scan."
             }
-          />
-        </>
-      )}
-
-      {mode === "videos" && tab === "favorites" && (
-        <>
-          <CollectionJumpNav items={browserJumpItems} onCollapseAll={() => setBrowserCollapseSignal((n) => n + 1)} />
-          <GroupedMediaBrowser
-            type="video"
-            groupBy={groupByForBrowser}
-            order={order}
-            search={search}
-            tagIds={tagFilter.withoutTags ? undefined : tagFilter.selectedTagIds}
-            tagMode={tagFilter.mode}
-            withoutTags={tagFilter.withoutTags}
-            favoritesOnly
-            selectionMode={selectionMode}
-            selectedKeys={selectedMediaKeys}
-            onToggleItem={(item) => toggleMediaItem(getMediaItemKey(item))}
-            onToggleGroupItems={(items) => toggleGroupMediaSelection(items.map(getMediaItemKey))}
-            onItemsLoaded={handleItemsLoaded}
-            onGroupsChange={setBrowserJumpItems}
-            collapseAllSignal={browserCollapseSignal}
-            emptyMessage="No favorite videos yet. Hover a thumbnail and click the star to add one."
           />
         </>
       )}
@@ -988,6 +962,8 @@ export function LibraryPage() {
           </div>
         </div>
       ) : null}
+        </div>
+      </div>
     </div>
   );
 }
