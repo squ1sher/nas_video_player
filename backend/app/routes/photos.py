@@ -311,7 +311,7 @@ def get_photo_thumbnail(
         _ensure_photo_derivatives(db, photo, settings, need_thumbnail=True)
         thumbnail_file = _prepared_thumbnail_file(photo, settings)
     if thumbnail_file is not None:
-        return FileResponse(thumbnail_file)
+        return FileResponse(thumbnail_file, headers={"Cache-Control": "public, max-age=86400"})
 
     return Response(
         content=build_photo_placeholder_bytes(raw=bool(photo.raw_format)),
@@ -337,7 +337,7 @@ def get_photo_preview(
         _ensure_photo_derivatives(db, photo, settings, need_preview=True)
         preview_file = _prepared_preview_file(photo, settings)
     if preview_file is not None:
-        return FileResponse(preview_file)
+        return FileResponse(preview_file, headers={"Cache-Control": "public, max-age=86400"})
 
     return Response(
         content=build_photo_placeholder_bytes(raw=bool(photo.raw_format)),

@@ -642,7 +642,7 @@ def get_thumbnail(
     if not thumb_path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail file missing")
 
-    return FileResponse(thumb_path)
+    return FileResponse(thumb_path, headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/{video_id}/download")

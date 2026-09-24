@@ -44,8 +44,12 @@ def generate_thumbnail(
         str(video_path),
         "-frames:v",
         "1",
+        # Cap thumbnail size to what the UI grid actually needs; the source video can be
+        # much higher resolution, so scaling here keeps thumbnail files small and fast to load.
+        "-vf",
+        "scale='min(480,iw)':-2",
         "-q:v",
-        "2",
+        "4",
         str(thumb_file),
     ]
 

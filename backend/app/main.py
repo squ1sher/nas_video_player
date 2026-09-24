@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi import Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -40,6 +41,8 @@ configure_logging(settings.logs_path)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="NAS Video Player", version="0.2.6")
+# Compress large JSON list responses (video/photo listings) to speed up gallery loads.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.include_router(health_router)
 app.include_router(scan_router)
@@ -101,7 +104,21 @@ def on_startup() -> None:
 
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
-    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+
+    class ImmutableStaticFiles(StaticFiles):
+        """Serves Vite's content-hashed assets with a long-lived, immutable cache.
+
+        Safe because Vite fingerprints each asset filename with a content hash,
+        so a new build always produces new filenames instead of reusing old ones.
+        """
+
+        async def get_response(self, path: str, scope):  # type: ignore[override]
+            response = await super().get_response(path, scope)
+            if response.status_code == 200:
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return response
+
+    app.mount("/assets", ImmutableStaticFiles(directory=static_dir / "assets"), name="assets")
 
 
 @app.get("/", response_model=None)
