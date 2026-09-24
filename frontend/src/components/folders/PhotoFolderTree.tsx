@@ -54,7 +54,7 @@ function PhotoCard({
 }) {
   const itemContent = (
     <>
-      <div style={{ position: "relative" }}>
+      <div className="thumb-wrap thumb-wrap-square">
         {item.thumbnail_url ? (
           <img
             src={item.thumbnail_url}
@@ -99,17 +99,6 @@ function PhotoCard({
             />
           </label>
         ) : null}
-      </div>
-      <div className="overlay">
-        <div className="top-row">
-          <span className="title" style={{ maxWidth: "100%" }}>
-            {item.display_title}
-          </span>
-        </div>
-        <div className="meta-row">
-          <span>Photo</span>
-          <span>{item.extension}</span>
-        </div>
       </div>
     </>
   );

@@ -51,16 +51,15 @@ export function VideoCard({
           </label>
         ) : null}
 
-        <div className="thumb-title-overlay" aria-hidden="true">
-          {video.tags.length > 0 ? (
+        {video.tags.length > 0 ? (
+          <div className="thumb-title-overlay" aria-hidden="true">
             <div className="thumb-tags-row">
               {video.tags.map((tag) => (
                 <span key={tag.id} className="thumb-tag-chip" title={tag.path}>{tag.path}</span>
               ))}
             </div>
-          ) : null}
-          <span className="thumb-title-text">{video.title}</span>
-        </div>
+          </div>
+        ) : null}
       </div>
     </>
   );

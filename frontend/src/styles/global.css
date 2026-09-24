@@ -807,7 +807,7 @@ button {
   align-items: center;
   justify-content: center;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  height: 100%;
   background: #1a1a1a;
   color: #66707a;
   font-size: 12px;
@@ -858,6 +858,12 @@ button.video-card {
   width: 100%;
   aspect-ratio: 16 / 9;
   background: #222;
+}
+
+/* Square crop used by mixed photo/video grids so portrait, square, and
+   landscape thumbnails all occupy identical tiles with no leftover gaps. */
+.thumb-wrap-square {
+  aspect-ratio: 1 / 1;
 }
 
 .video-select-checkbox {

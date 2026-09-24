@@ -17,7 +17,7 @@ type Props = {
 export function MediaCard({ item, selectionMode = false, selected = false, onToggleSelect }: Props) {
   const content = (
     <>
-      <div style={{ position: "relative" }}>
+      <div className="thumb-wrap thumb-wrap-square">
         {item.thumbnail_url ? (
           <img
             src={item.thumbnail_url}
@@ -58,17 +58,6 @@ export function MediaCard({ item, selectionMode = false, selected = false, onTog
             <input type="checkbox" checked={selected} onChange={() => onToggleSelect?.(item)} />
           </label>
         ) : null}
-      </div>
-      <div className="overlay">
-        <div className="top-row">
-          <span className="title" style={{ maxWidth: "100%" }}>
-            {item.display_title}
-          </span>
-        </div>
-        <div className="meta-row">
-          <span>{item.type === "video" ? "Video" : "Photo"}</span>
-          <span>{item.extension}</span>
-        </div>
       </div>
     </>
   );
